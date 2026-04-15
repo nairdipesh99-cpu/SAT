@@ -1,370 +1,480 @@
-import streamlit as st
-import sys, os
+import requests
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
 import time
-sys.path.insert(0, os.path.dirname(__file__))
+import streamlit as st
 
-st.set_page_config(
-    page_title="StockSense — AI Investment Intelligence",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+# ──────────────────────────────────────────────
+# NSE INDIA — Primary source for all Indian data
+# ──────────────────────────────────────────────
+NSE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.nseindia.com/",
+    "X-Requested-With": "XMLHttpRequest",
+}
 
-from utils.styles  import MAIN_CSS
-from utils.helpers import get_market_status, gc_to_emoji, decision_to_color, score_to_decision, calculate_score
-from data.yahoo_fetcher import get_stock_info, get_nifty50_tickers, get_sp100_tickers, get_ftse100_tickers, search_ticker, get_historical_data, calculate_technicals
-from data.news_fetcher  import calculate_gc_status, get_gc_news
-from components.portfolio_panel import render_portfolio
-from components.stock_card import render_stock_row, render_full_analysis
-from components.alerts_tab import render_alerts_tab
+BSE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://www.bseindia.com/",
+}
 
-st.markdown(MAIN_CSS, unsafe_allow_html=True)
+NSE_INDEX_MAP = {
+    "^NSEI":      "NIFTY 50",
+    "^BSESN":     "SENSEX",
+    "^CNXMETAL":  "NIFTY METAL",
+    "^CNXPHARMA": "NIFTY PHARMA",
+    "^CNXIT":     "NIFTY IT",
+    "^CNXBANK":   "NIFTY BANK",
+}
 
-# ── Session State ──
-if "watchlist_india" not in st.session_state: st.session_state.watchlist_india = []
-if "watchlist_us"    not in st.session_state: st.session_state.watchlist_us    = []
-if "watchlist_uk"    not in st.session_state: st.session_state.watchlist_uk    = []
-if "selected_stock"  not in st.session_state: st.session_state.selected_stock  = None
-if "selected_market" not in st.session_state: st.session_state.selected_market = "india"
-if "api_key_set"     not in st.session_state: st.session_state.api_key_set     = False
+def _nse_session():
+    s = requests.Session()
+    try:
+        s.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=6)
+    except:
+        pass
+    return s
 
-# ── Header ──
-market_status = get_market_status()
-india_dot = "🟢" if market_status["india"] else "🔴"
-us_dot    = "🟢" if market_status["us"]    else "🔴"
-uk_dot    = "🟢" if market_status["uk"]    else "🔴"
+# ──────────────────────────────────────────────
+# NSE — All Indices
+# ──────────────────────────────────────────────
+@st.cache_data(ttl=120)
+def _get_all_nse_indices():
+    try:
+        session = _nse_session()
+        r = session.get("https://www.nseindia.com/api/allIndices", headers=NSE_HEADERS, timeout=8)
+        if r.status_code == 200:
+            return r.json().get("data", [])
+    except:
+        pass
+    return []
 
-st.markdown(f"""
-<div class="app-header">
-    <div style="display:flex;align-items:center;gap:1rem;">
-        <div class="app-logo">Stock<span>Sense</span></div>
-        <div style="font-size:0.72rem;color:#4B5563;">AI Investment Intelligence</div>
-    </div>
-    <div style="display:flex;gap:1.5rem;align-items:center;">
-        <div class="market-time">{india_dot} NSE {market_status['time_ist']}</div>
-        <div class="market-time">{us_dot} NYSE {market_status['time_est']}</div>
-        <div class="market-time">{uk_dot} LSE {market_status['time_gmt']}</div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+@st.cache_data(ttl=120)
+def _get_bse_sensex():
+    try:
+        indices = _get_all_nse_indices()
+        for idx in indices:
+            if "SENSEX" in (idx.get("index") or "").upper():
+                price = idx.get("last") or idx.get("lastPrice")
+                prev  = idx.get("previousClose") or price
+                chg   = ((price - prev) / prev * 100) if prev and price else 0
+                return {
+                    "ticker": "^BSESN", "name": "SENSEX",
+                    "price": price, "prev_close": prev, "change_pct": round(chg, 2),
+                    "day_high": idx.get("high"), "day_low": idx.get("low"),
+                    "week_52_high": idx.get("yearHigh"), "week_52_low": idx.get("yearLow"),
+                    "volume": None, "avg_volume": None, "market_cap": None,
+                    "pe_ratio": None, "pb_ratio": None, "revenue_growth": 0,
+                    "profit_margin": 0, "debt_to_equity": None, "current_ratio": None,
+                    "roe": 0, "eps": None, "dividend_yield": 0,
+                    "analyst_rating": "", "target_price": None,
+                    "sector": "Index", "industry": "Index",
+                    "currency": "INR", "exchange": "BSE", "beta": None,
+                }
+    except:
+        pass
+    return None
 
-# ── Main Tabs ──
-tab_india, tab_us, tab_uk, tab_gc, tab_alerts, tab_settings = st.tabs([
-    "🇮🇳  Indian Stocks",
-    "🇺🇸  US Stocks",
-    "🇬🇧  UK Stocks",
-    "🌍  GC Monitor",
-    "🛡️  Position Alerts",
-    "⚙️  Settings",
-])
+def _get_nse_index_quote(symbol):
+    if symbol == "^BSESN":
+        return _get_bse_sensex()
+    target_name = NSE_INDEX_MAP.get(symbol, "").upper()
+    indices = _get_all_nse_indices()
+    for idx in indices:
+        name = (idx.get("index") or idx.get("indexSymbol") or "").upper()
+        if target_name and target_name in name:
+            price = idx.get("last") or idx.get("lastPrice")
+            prev  = idx.get("previousClose") or price
+            chg   = ((price - prev) / prev * 100) if prev and price else 0
+            return {
+                "ticker": symbol,
+                "name":   idx.get("index", target_name),
+                "price":  price,
+                "prev_close":   prev,
+                "change_pct":   round(chg, 2),
+                "day_high":     idx.get("high"),
+                "day_low":      idx.get("low"),
+                "week_52_high": idx.get("yearHigh"),
+                "week_52_low":  idx.get("yearLow"),
+                "volume": None, "avg_volume": None, "market_cap": None,
+                "pe_ratio": None, "pb_ratio": None, "revenue_growth": 0,
+                "profit_margin": 0, "debt_to_equity": None, "current_ratio": None,
+                "roe": 0, "eps": None, "dividend_yield": 0,
+                "analyst_rating": "", "target_price": None,
+                "sector": "Index", "industry": "Index",
+                "currency": "INR", "exchange": "NSE", "beta": None,
+            }
+    return None
 
-def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers):
-    watchlist = st.session_state[watchlist_key]
+# ──────────────────────────────────────────────
+# NSE — Individual Equity Stocks
+# ──────────────────────────────────────────────
+@st.cache_data(ttl=180)
+def _get_nse_equity(symbol):
+    try:
+        session = _nse_session()
+        url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
+        r   = session.get(url, headers=NSE_HEADERS, timeout=8)
+        if r.status_code == 200:
+            data    = r.json()
+            pd_info = data.get("priceInfo", {})
+            meta    = data.get("metadata", {})
+            sec     = data.get("securityInfo", {})
+            price   = pd_info.get("lastPrice")
+            prev    = pd_info.get("previousClose") or price
+            if not price:
+                return None
+            chg = ((price - prev) / prev * 100) if prev else 0
+            return {
+                "ticker":         symbol + ".NS",
+                "name":           meta.get("companyName", symbol),
+                "price":          price,
+                "prev_close":     prev,
+                "change_pct":     round(chg, 2),
+                "day_high":       pd_info.get("intraDayHighLow", {}).get("max"),
+                "day_low":        pd_info.get("intraDayHighLow", {}).get("min"),
+                "week_52_high":   pd_info.get("weekHighLow", {}).get("max"),
+                "week_52_low":    pd_info.get("weekHighLow", {}).get("min"),
+                "volume":         data.get("marketDeptOrderBook", {}).get("tradeInfo", {}).get("totalTradedVolume"),
+                "avg_volume":     None,
+                "market_cap":     None,
+                "pe_ratio":       sec.get("pdSymbolPe"),
+                "pb_ratio":       None,
+                "revenue_growth": 0,
+                "profit_margin":  0,
+                "debt_to_equity": None,
+                "current_ratio":  None,
+                "roe":            0,
+                "eps":            None,
+                "dividend_yield": 0,
+                "analyst_rating": "",
+                "target_price":   None,
+                "sector":         meta.get("industry", ""),
+                "industry":       meta.get("industry", ""),
+                "currency":       "INR",
+                "exchange":       "NSE",
+                "beta":           None,
+            }
+    except:
+        pass
+    return None
 
-    if st.session_state.selected_stock and st.session_state.selected_market == market:
-        if st.button("← Back to Market", key=f"back_{market}"):
-            st.session_state.selected_stock = None
-            st.rerun()
-        render_full_analysis(st.session_state.selected_stock, market)
-        return
+# ──────────────────────────────────────────────
+# US / UK — yfinance via history only (avoids 429)
+# ──────────────────────────────────────────────
+@st.cache_data(ttl=300)
+def _get_us_uk_quote(ticker):
+    try:
+        import yfinance as yf
+        time.sleep(0.5)
+        t    = yf.Ticker(ticker)
+        hist = t.history(period="5d", interval="1d")
+        if hist is not None and not hist.empty:
+            price = float(hist["Close"].dropna().iloc[-1])
+            prev  = float(hist["Close"].dropna().iloc[-2]) if len(hist["Close"].dropna()) > 1 else price
+            chg   = ((price - prev) / prev * 100) if prev else 0
+            name  = ticker
+            try:
+                fi = t.fast_info
+                name = getattr(fi, "long_name", None) or getattr(fi, "short_name", None) or ticker
+            except:
+                pass
+            curr = "GBP" if ticker.endswith(".L") else "USD"
+            exch = "LSE"  if ticker.endswith(".L") else "NYSE"
+            return {
+                "ticker":         ticker,
+                "name":           name,
+                "price":          price,
+                "prev_close":     prev,
+                "change_pct":     round(chg, 2),
+                "day_high":       float(hist["High"].iloc[-1]),
+                "day_low":        float(hist["Low"].iloc[-1]),
+                "week_52_high":   None,
+                "week_52_low":    None,
+                "volume":         int(hist["Volume"].iloc[-1]),
+                "avg_volume":     None,
+                "market_cap":     None,
+                "pe_ratio":       None,
+                "pb_ratio":       None,
+                "revenue_growth": 0,
+                "profit_margin":  0,
+                "debt_to_equity": None,
+                "current_ratio":  None,
+                "roe":            0,
+                "eps":            None,
+                "dividend_yield": 0,
+                "analyst_rating": "",
+                "target_price":   None,
+                "sector":         "",
+                "industry":       "",
+                "currency":       curr,
+                "exchange":       exch,
+                "beta":           None,
+            }
+    except:
+        pass
+    return None
 
-    main_col, port_col = st.columns([7, 3])
+@st.cache_data(ttl=300)
+def _get_global_index_quote(symbol):
+    index_names = {
+        "^GSPC":    "S&P 500",
+        "^DJI":     "DOW JONES",
+        "^IXIC":    "NASDAQ",
+        "^VIX":     "VIX",
+        "^FTSE":    "FTSE 100",
+        "^FTMC":    "FTSE 250",
+        "GBPUSD=X": "GBP/USD",
+    }
+    try:
+        import yfinance as yf
+        time.sleep(0.5)
+        t    = yf.Ticker(symbol)
+        hist = t.history(period="5d", interval="1d")
+        if hist is not None and not hist.empty:
+            closes = hist["Close"].dropna()
+            price  = float(closes.iloc[-1])
+            prev   = float(closes.iloc[-2]) if len(closes) > 1 else price
+            chg    = ((price - prev) / prev * 100) if prev else 0
+            curr   = "GBP" if any(x in symbol for x in ["FTSE","FTMC"]) else "USD"
+            return {
+                "ticker":         symbol,
+                "name":           index_names.get(symbol, symbol),
+                "price":          price,
+                "prev_close":     prev,
+                "change_pct":     round(chg, 2),
+                "day_high":       float(hist["High"].iloc[-1]),
+                "day_low":        float(hist["Low"].iloc[-1]),
+                "week_52_high":   None,
+                "week_52_low":    None,
+                "volume":         None,
+                "avg_volume":     None,
+                "market_cap":     None,
+                "pe_ratio":       None,
+                "pb_ratio":       None,
+                "revenue_growth": 0,
+                "profit_margin":  0,
+                "debt_to_equity": None,
+                "current_ratio":  None,
+                "roe":            0,
+                "eps":            None,
+                "dividend_yield": 0,
+                "analyst_rating": "",
+                "target_price":   None,
+                "sector":         "Index",
+                "industry":       "Index",
+                "currency":       curr,
+                "exchange":       "INDEX",
+                "beta":           None,
+            }
+    except:
+        pass
+    return None
 
-    with main_col:
-        # ── Market Indices ──
-        st.markdown('<div class="section-header">MARKET OVERVIEW</div>', unsafe_allow_html=True)
-        idx_cols = st.columns(len(index_tickers))
-        for i, (idx_ticker, idx_name) in enumerate(index_tickers):
-            with idx_cols[i]:
-                try:
-                    info = get_stock_info(idx_ticker)
-                    if info and info.get("price"):
-                        p   = info["price"]
-                        chg = info.get("change_pct", 0) or 0
-                        clr = "#10B981" if chg >= 0 else "#EF4444"
-                        arr = "▲" if chg >= 0 else "▼"
-                        st.markdown(f"""
-                        <div class="index-pill">
-                            <div class="index-name">{idx_name}</div>
-                            <div class="index-value">{currency}{p:,.0f}</div>
-                            <div style="font-size:0.72rem;color:{clr};font-weight:500;">{arr} {abs(chg):.2f}%</div>
-                        </div>""", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"""
-                        <div class="index-pill">
-                            <div class="index-name">{idx_name}</div>
-                            <div style="color:#6B7280;font-size:0.8rem;">Unavailable</div>
-                        </div>""", unsafe_allow_html=True)
-                except Exception:
-                    st.markdown(f"""
-                    <div class="index-pill">
-                        <div class="index-name">{idx_name}</div>
-                        <div style="color:#6B7280;font-size:0.8rem;">Unavailable</div>
-                    </div>""", unsafe_allow_html=True)
+# ──────────────────────────────────────────────
+# Main Router
+# ──────────────────────────────────────────────
+@st.cache_data(ttl=180)
+def get_stock_info(ticker):
+    if ticker in NSE_INDEX_MAP:
+        return _get_nse_index_quote(ticker)
+    if ticker.endswith(".NS") or ticker.endswith(".BO"):
+        symbol = ticker.replace(".NS", "").replace(".BO", "")
+        return _get_nse_equity(symbol)
+    if ticker.startswith("^") or ticker in ("GBPUSD=X",):
+        return _get_global_index_quote(ticker)
+    return _get_us_uk_quote(ticker)
 
-        st.markdown('<div style="margin-top:1rem;"></div>', unsafe_allow_html=True)
-
-        # ── Search & Add ──
-        st.markdown('<div class="section-header">ADD STOCKS TO WATCHLIST</div>', unsafe_allow_html=True)
-        s1, s2 = st.columns([4, 1])
-        with s1:
-            query = st.text_input(
-                "Search",
-                placeholder="Type company name or ticker (e.g. Tata Steel or TATASTEEL.NS)",
-                key=f"search_{market}",
-                label_visibility="collapsed"
-            )
-        with s2:
-            if st.button("Add Stock", type="primary", key=f"add_btn_{market}"):
-                if query:
-                    with st.spinner("Searching..."):
-                        try:
-                            found = search_ticker(query)
-                        except Exception:
-                            found = None
-                    if found and found not in watchlist:
-                        st.session_state[watchlist_key].append(found)
-                        st.success(f"✓ {found} added")
-                        st.rerun()
-                    elif found in watchlist:
-                        st.warning("Already in watchlist")
-                    else:
-                        st.error("Stock not found. Try the exact ticker symbol.")
-
-        # ── Quick Add Popular ──
-        if not watchlist:
-            st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:0.5rem;">Quick add popular stocks:</div>', unsafe_allow_html=True)
-            popular = tickers_fn()[:8]
-            p_cols  = st.columns(4)
-            for i, t in enumerate(popular):
-                with p_cols[i % 4]:
-                    label = t.replace(".NS","").replace(".BO","").replace(".L","")
-                    if st.button(label, key=f"quick_{t}_{market}"):
-                        if t not in st.session_state[watchlist_key]:
-                            st.session_state[watchlist_key].append(t)
-                            st.rerun()
-
-        # ── Watchlist ──
-        if watchlist:
-            st.markdown('<div class="section-header">YOUR WATCHLIST</div>', unsafe_allow_html=True)
-            gc_winners = []
-            for ticker in watchlist:
-                try:
-                    info = get_stock_info(ticker)
-                    if not info:
-                        st.markdown(f'<div style="font-size:0.8rem;color:#6B7280;padding:0.5rem;">⚠ Could not load {ticker} — data source may be throttling. Try again shortly.</div>', unsafe_allow_html=True)
-                        continue
-                    hist     = get_historical_data(ticker, period="1y")
-                    tech     = calculate_technicals(hist) if hist is not None else {}
-                    gc_st, _ = calculate_gc_status(ticker, info.get("sector",""))
-                    metrics  = {
-                        "revenue_growth": info.get("revenue_growth"),
-                        "profit_margin":  info.get("profit_margin"),
-                        "debt_to_equity": info.get("debt_to_equity"),
-                        "rsi":            tech.get("rsi"),
-                        "pe_ratio":       info.get("pe_ratio"),
-                    }
-                    score   = calculate_score(metrics)
-                    short_v = score_to_decision(score, gc_st)
-                    long_v  = score_to_decision(min(score + 8, 100), "GREEN")
-                    if gc_st == "WINNER":
-                        gc_winners.append(info.get("name",""))
-                    c1, c2 = st.columns([9, 1])
-                    with c1:
-                        render_stock_row(info, gc_st, short_v, long_v, ticker)
-                    with c2:
-                        if st.button("View", key=f"view_{ticker}_{market}"):
-                            st.session_state.selected_stock  = ticker
-                            st.session_state.selected_market = market
-                            st.rerun()
-                        if st.button("✕", key=f"del_{ticker}_{market}"):
-                            st.session_state[watchlist_key].remove(ticker)
-                            st.rerun()
-                except Exception:
-                    st.markdown(f'<div style="font-size:0.8rem;color:#6B7280;padding:0.5rem;">⚠ Error loading {ticker}</div>', unsafe_allow_html=True)
-                    continue
-
-            if gc_winners:
-                st.markdown(f"""
-                <div class="gc-winners-banner">
-                    <div class="gc-winners-title">⭐ GC WINNERS — RISING DUE TO GLOBAL EVENTS</div>
-                    <div style="font-size:0.82rem;color:#FCD34D;">{' · '.join(gc_winners)}</div>
-                </div>""", unsafe_allow_html=True)
-
-        # ── Top Auto Picks ──
-        st.markdown('<div class="section-header">TODAY\'S TOP AUTO PICKS — FROM MARKET SCAN</div>', unsafe_allow_html=True)
-        with st.spinner("Scanning market for top picks..."):
-            scan_tickers = [t for t in tickers_fn()[:6] if t not in watchlist][:4]
-            scored = []
-            for t in scan_tickers:
-                try:
-                    info = get_stock_info(t)
-                    if not info:
-                        continue
-                    hist = get_historical_data(t, period="6mo")
-                    tech = calculate_technicals(hist) if hist is not None else {}
-                    gc_s, _ = calculate_gc_status(t, info.get("sector",""))
-                    metrics = {
-                        "revenue_growth": info.get("revenue_growth"),
-                        "profit_margin":  info.get("profit_margin"),
-                        "debt_to_equity": info.get("debt_to_equity"),
-                        "rsi":            tech.get("rsi"),
-                        "pe_ratio":       info.get("pe_ratio"),
-                    }
-                    score   = calculate_score(metrics)
-                    short_v = score_to_decision(score, gc_s)
-                    long_v  = score_to_decision(min(score + 8, 100), "GREEN")
-                    scored.append((score, t, info, gc_s, short_v, long_v))
-                except Exception:
-                    continue
-                time.sleep(0.3)
-
-            scored.sort(reverse=True, key=lambda x: x[0])
-            top_picks = scored[:3]
-
-        if top_picks:
-            for score, ticker, info, gc_s, sv, lv in top_picks:
-                c1, c2 = st.columns([9, 1])
-                with c1:
-                    render_stock_row(info, gc_s, sv, lv, f"auto_{ticker}")
-                with c2:
-                    if st.button("View", key=f"view_auto_{ticker}_{market}"):
-                        st.session_state.selected_stock  = ticker
-                        st.session_state.selected_market = market
-                        st.rerun()
-        else:
-            st.markdown('<div style="font-size:0.8rem;color:#6B7280;padding:0.5rem;">⚠ No picks available right now. Data source may be busy — please refresh in a moment.</div>', unsafe_allow_html=True)
-
-    with port_col:
-        st.markdown('<div class="portfolio-card">', unsafe_allow_html=True)
-        render_portfolio(market_filter=market)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-
-# ── Indian Tab ──
-with tab_india:
-    render_market_tab(
-        market="india",
-        watchlist_key="watchlist_india",
-        tickers_fn=get_nifty50_tickers,
-        currency="₹",
-        index_tickers=[
-            ("^NSEI",     "NIFTY 50"),
-            ("^BSESN",    "SENSEX"),
-            ("^CNXMETAL", "NIFTY METAL"),
-            ("^CNXPHARMA","NIFTY PHARMA"),
-        ]
-    )
-
-# ── US Tab ──
-with tab_us:
-    render_market_tab(
-        market="us",
-        watchlist_key="watchlist_us",
-        tickers_fn=get_sp100_tickers,
-        currency="$",
-        index_tickers=[
-            ("^GSPC", "S&P 500"),
-            ("^DJI",  "DOW JONES"),
-            ("^IXIC", "NASDAQ"),
-            ("^VIX",  "VIX"),
-        ]
-    )
-
-# ── UK Tab ──
-with tab_uk:
-    render_market_tab(
-        market="uk",
-        watchlist_key="watchlist_uk",
-        tickers_fn=get_ftse100_tickers,
-        currency="£",
-        index_tickers=[
-            ("^FTSE",   "FTSE 100"),
-            ("^FTMC",   "FTSE 250"),
-            ("GBPUSD=X","GBP/USD"),
-        ]
-    )
-
-# ── GC Monitor Tab ──
-with tab_gc:
-    st.markdown('<div class="section-header">🌍 GLOBAL CRISIS MONITOR</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div style="font-size:0.8rem;color:#6B7280;margin-bottom:1rem;">
-        Monitoring geopolitical events, commodity prices, interest rates and macroeconomic conditions.
-        The GC dot on each stock reflects how global events specifically impact that company.
-    </div>""", unsafe_allow_html=True)
-
-    categories = [
-        ("Geopolitical Risk",   "🔴", "↑", "Ongoing conflicts affecting global supply chains and energy prices"),
-        ("Recession Risk",      "🟡", "→", "Mixed signals — GDP growth slowing in major economies"),
-        ("Interest Rate Risk",  "🟡", "↓", "Central banks signalling pause in rate hikes"),
-        ("Commodity Prices",    "🔴", "↑", "Oil and coal prices elevated — pressure on manufacturers"),
-        ("Policy & Regulation", "🟢", "→", "No major regulatory changes expected near term"),
-        ("Currency Risk",       "🟡", "→", "INR stable vs USD, slight GBP weakness"),
-    ]
-    for cat, status, trend, desc in categories:
-        t_color = "#EF4444" if trend == "↑" else "#10B981" if trend == "↓" else "#6B7280"
-        st.markdown(f"""
-        <div class="gc-category-row">
-            <div>
-                <div style="font-size:0.85rem;color:#D1D5DB;font-weight:500;">{cat}</div>
-                <div style="font-size:0.72rem;color:#6B7280;margin-top:2px;">{desc}</div>
-            </div>
-            <div style="display:flex;align-items:center;gap:0.75rem;">
-                <span style="font-size:1rem;">{status}</span>
-                <span style="font-size:0.85rem;color:{t_color};font-weight:600;">{trend} {"Worsening" if trend=="↑" else "Improving" if trend=="↓" else "Stable"}</span>
-            </div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown('<div class="section-header" style="margin-top:1.5rem;">LATEST MACRO NEWS</div>', unsafe_allow_html=True)
-    with st.spinner("Fetching global news..."):
+# ──────────────────────────────────────────────
+# Historical Data
+# ──────────────────────────────────────────────
+@st.cache_data(ttl=600)
+def get_historical_data(ticker, period="5y", interval="1wk"):
+    if ticker.endswith(".NS") or ticker.endswith(".BO"):
+        symbol   = ticker.replace(".NS","").replace(".BO","")
+        days_map = {"1mo":30,"3mo":90,"6mo":180,"1y":365,"2y":730,"5y":1825}
+        days     = days_map.get(period, 365)
         try:
-            gc_news = get_gc_news()
-        except Exception:
-            gc_news = []
-    if gc_news:
-        for item in gc_news[:8]:
-            imp_color = "#EF4444" if item["impact"] == "NEGATIVE" else "#10B981" if item["impact"] == "POSITIVE" else "#6B7280"
-            st.markdown(f"""
-            <div style="border-left:3px solid {imp_color};padding:0.4rem 0.75rem;margin-bottom:0.4rem;background:#111827;border-radius:0 8px 8px 0;">
-                <div style="font-size:0.65rem;font-weight:600;color:{imp_color};text-transform:uppercase;">{item['impact']} · {item.get('source','')}</div>
-                <div style="font-size:0.8rem;color:#D1D5DB;margin-top:2px;">{item['title']}</div>
-                <div style="font-size:0.68rem;color:#4B5563;margin-top:2px;">{item.get('time','')}</div>
-            </div>""", unsafe_allow_html=True)
-    else:
-        st.info("Could not fetch global news. Check your internet connection.")
+            session = _nse_session()
+            end   = datetime.now()
+            start = end - timedelta(days=days)
+            url = (
+                f"https://www.nseindia.com/api/historical/cm/equity"
+                f"?symbol={symbol}&series=[%22EQ%22]"
+                f"&from={start.strftime('%d-%m-%Y')}&to={end.strftime('%d-%m-%Y')}"
+            )
+            r = session.get(url, headers=NSE_HEADERS, timeout=10)
+            if r.status_code == 200:
+                rows = r.json().get("data", [])
+                if rows:
+                    df = pd.DataFrame(rows)
+                    df["Date"]   = pd.to_datetime(df["CH_TIMESTAMP"])
+                    df["Open"]   = df["CH_OPENING_PRICE"].astype(float)
+                    df["High"]   = df["CH_TRADE_HIGH_PRICE"].astype(float)
+                    df["Low"]    = df["CH_TRADE_LOW_PRICE"].astype(float)
+                    df["Close"]  = df["CH_CLOSING_PRICE"].astype(float)
+                    df["Volume"] = df["CH_TOT_TRADED_QTY"].astype(float)
+                    df.set_index("Date", inplace=True)
+                    df.sort_index(inplace=True)
+                    return df[["Open","High","Low","Close","Volume"]].dropna()
+        except:
+            pass
+    try:
+        import yfinance as yf
+        time.sleep(0.5)
+        t  = yf.Ticker(ticker)
+        df = t.history(period=period, interval=interval)
+        if df is None or df.empty:
+            return None
+        df.index = pd.to_datetime(df.index)
+        return df[["Open","High","Low","Close","Volume"]].dropna()
+    except:
+        return None
 
-# ── Alerts Tab ──
-with tab_alerts:
-    render_alerts_tab()
+# ──────────────────────────────────────────────
+# Intraday Data
+# ──────────────────────────────────────────────
+@st.cache_data(ttl=120)
+def get_intraday_data(ticker):
+    if ticker.endswith(".NS") or ticker.endswith(".BO"):
+        symbol = ticker.replace(".NS","").replace(".BO","")
+        try:
+            session = _nse_session()
+            url = f"https://www.nseindia.com/api/chart-databyindex?index={symbol}EQN"
+            r   = session.get(url, headers=NSE_HEADERS, timeout=8)
+            if r.status_code == 200:
+                raw = r.json().get("grapthData", [])
+                if raw:
+                    df = pd.DataFrame(raw, columns=["Timestamp","Close"])
+                    df["Timestamp"] = pd.to_datetime(df["Timestamp"], unit="ms")
+                    df.set_index("Timestamp", inplace=True)
+                    df["Open"]   = df["Close"]
+                    df["High"]   = df["Close"]
+                    df["Low"]    = df["Close"]
+                    df["Volume"] = 0
+                    return df[["Open","High","Low","Close","Volume"]]
+        except:
+            pass
+    try:
+        import yfinance as yf
+        time.sleep(0.5)
+        t  = yf.Ticker(ticker)
+        df = t.history(period="1d", interval="5m")
+        if df is None or df.empty:
+            return None
+        df.index = pd.to_datetime(df.index)
+        return df[["Open","High","Low","Close","Volume"]].dropna()
+    except:
+        return None
 
-# ── Settings Tab ──
-with tab_settings:
-    st.markdown('<div class="section-header">⚙️ SETTINGS</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div style="background:#111827;border:1px solid #1F2937;border-radius:12px;padding:1.25rem;margin-bottom:1rem;">
-        <div style="font-size:0.85rem;font-weight:600;color:#F9FAFB;margin-bottom:0.5rem;">🔑 Anthropic API Key</div>
-        <div style="font-size:0.78rem;color:#6B7280;margin-bottom:0.75rem;">
-            Add your API key to unlock full AI-powered analysis, expert consensus, and intelligent verdicts.
-            Get your free key at console.anthropic.com
-        </div>
-    </div>""", unsafe_allow_html=True)
-    api_key_input = st.text_input("Anthropic API Key", type="password", placeholder="sk-ant-api03-...", key="api_key_input")
-    if st.button("Save API Key", type="primary"):
-        if api_key_input.startswith("sk-ant"):
-            st.session_state.api_key_set = True
-            st.success("✓ API key saved. Full AI analysis is now enabled.")
-        else:
-            st.error("Invalid API key format. Should start with sk-ant-")
+# ──────────────────────────────────────────────
+# Search
+# ──────────────────────────────────────────────
+@st.cache_data(ttl=300)
+def search_ticker(query):
+    indian_map = {
+        "tata steel": "TATASTEEL.NS", "jswsteel": "JSWSTEEL.NS", "jsw steel": "JSWSTEEL.NS",
+        "sail": "SAIL.NS", "reliance": "RELIANCE.NS", "infosys": "INFY.NS",
+        "tcs": "TCS.NS", "hdfc bank": "HDFCBANK.NS", "icici bank": "ICICIBANK.NS",
+        "wipro": "WIPRO.NS", "ongc": "ONGC.NS", "coal india": "COALINDIA.NS",
+        "sun pharma": "SUNPHARMA.NS", "bajaj finance": "BAJFINANCE.NS",
+        "asian paints": "ASIANPAINT.NS", "maruti": "MARUTI.NS",
+        "jindal steel": "JINDALSTEL.NS", "apl apollo": "APLAPOLLO.NS",
+        "hindalco": "HINDALCO.NS", "vedanta": "VEDL.NS",
+    }
+    q = query.lower().strip()
+    if q in indian_map:
+        return indian_map[q]
+    try:
+        session = _nse_session()
+        url = f"https://www.nseindia.com/api/search-autocomplete?q={query}"
+        r   = session.get(url, headers=NSE_HEADERS, timeout=5)
+        if r.status_code == 200:
+            results = r.json().get("symbols", [])
+            if results:
+                sym = results[0].get("symbol")
+                if sym:
+                    return sym + ".NS"
+    except:
+        pass
+    try:
+        import yfinance as yf
+        for suffix in [".NS", ".BO", "", ".L"]:
+            try:
+                candidate = query.upper() + suffix
+                t    = yf.Ticker(candidate)
+                hist = t.history(period="2d", interval="1d")
+                if hist is not None and not hist.empty:
+                    return candidate
+            except:
+                pass
+            time.sleep(0.3)
+    except:
+        pass
+    return None
 
-    st.markdown('<div class="section-header" style="margin-top:1.5rem;">ABOUT</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div style="background:#111827;border:1px solid #1F2937;border-radius:12px;padding:1.25rem;font-size:0.82rem;color:#9CA3AF;line-height:1.7;">
-        <strong style="color:#F9FAFB;">StockSense</strong> — AI Investment Intelligence<br><br>
-        Data sources: NSE India · BSE India · Google News · Reuters RSS<br>
-        AI Analysis: Claude by Anthropic<br>
-        Charts: Plotly<br><br>
-        <span style="color:#EF4444;">⚠ Disclaimer:</span> This tool is for informational purposes only.
-        Always consult a qualified financial advisor before making investment decisions.
-        Past performance does not guarantee future results.
-    </div>""", unsafe_allow_html=True)
+# ──────────────────────────────────────────────
+# Technicals
+# ──────────────────────────────────────────────
+def calculate_technicals(df):
+    if df is None or len(df) < 20:
+        return {}
+    close = df["Close"]
+    delta = close.diff()
+    gain  = delta.clip(lower=0).rolling(14).mean()
+    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+    rs    = gain / loss
+    rsi   = round(float(100 - (100 / (1 + rs.iloc[-1]))), 1)
+    ma50  = round(float(close.rolling(min(50,  len(close))).mean().iloc[-1]), 2)
+    ma200 = round(float(close.rolling(min(200, len(close))).mean().iloc[-1]), 2)
+    current = round(float(close.iloc[-1]), 2)
+    high52  = round(float(close.tail(52).max()), 2)
+    low52   = round(float(close.tail(52).min()), 2)
+    pos52   = round((current - low52) / (high52 - low52) * 100, 1) if high52 != low52 else 50
+    golden_cross = ma50 > ma200
+    signal = "BULLISH" if golden_cross and rsi < 70 else "BEARISH" if not golden_cross and rsi > 50 else "NEUTRAL"
+    return {
+        "rsi":          rsi,
+        "ma50":         ma50,
+        "ma200":        ma200,
+        "current":      current,
+        "high_52w":     high52,
+        "low_52w":      low52,
+        "position_52w": pos52,
+        "golden_cross": golden_cross,
+        "signal":       signal,
+    }
+
+# ──────────────────────────────────────────────
+# Ticker Lists
+# ──────────────────────────────────────────────
+def get_nifty50_tickers():
+    return [
+        "RELIANCE.NS","TCS.NS","HDFCBANK.NS","INFY.NS","ICICIBANK.NS",
+        "HINDUNILVR.NS","ITC.NS","SBIN.NS","BHARTIARTL.NS","KOTAKBANK.NS",
+        "LT.NS","AXISBANK.NS","ASIANPAINT.NS","MARUTI.NS","SUNPHARMA.NS",
+        "TITAN.NS","ULTRACEMCO.NS","BAJFINANCE.NS","WIPRO.NS","HCLTECH.NS",
+        "ONGC.NS","NTPC.NS","POWERGRID.NS","COALINDIA.NS","JSWSTEEL.NS",
+        "TATASTEEL.NS","HINDALCO.NS","VEDL.NS","GRASIM.NS","TECHM.NS",
+        "NESTLEIND.NS","DIVISLAB.NS","DRREDDY.NS","CIPLA.NS","EICHERMOT.NS",
+        "BAJAJFINSV.NS","TATAMOTORS.NS","ADANIPORTS.NS","BPCL.NS","INDUSINDBK.NS",
+    ]
+
+def get_sp100_tickers():
+    return [
+        "AAPL","MSFT","GOOGL","AMZN","NVDA","META","TSLA","BRK-B","UNH","JNJ",
+        "JPM","V","PG","XOM","MA","HD","CVX","MRK","ABBV","PFE",
+        "AVGO","COST","LLY","BAC","KO","DIS","CSCO","TMO","WMT","PEP",
+        "ACN","DHR","ABT","MCD","NKE","ADBE","CRM","TXN","LIN","CMCSA",
+        "VZ","NFLX","PM","INTC","UPS","RTX","HON","AMD","QCOM","AMGN",
+    ]
+
+def get_ftse100_tickers():
+    return [
+        "SHEL.L","AZN.L","HSBA.L","ULVR.L","BP.L","RIO.L","GSK.L","DGE.L",
+        "BATS.L","LSEG.L","NG.L","NWG.L","LLOY.L","BARC.L","VOD.L","AAL.L",
+        "REL.L","EXPN.L","STAN.L","PRU.L","WPP.L","IAG.L","SBRY.L","TSCO.L",
+    ]
