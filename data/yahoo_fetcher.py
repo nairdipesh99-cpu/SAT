@@ -1,63 +1,136 @@
-import yfinance as yf
+import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import time
 import streamlit as st
 
-def _safe_get_info(ticker, retries=3, delay=2):
-    """Fetch yfinance info with retry and backoff"""
-    for attempt in range(retries):
-        try:
-            t = yf.Ticker(ticker)
-            info = t.info
-            if info and (info.get("regularMarketPrice") or info.get("currentPrice") or info.get("previousClose")):
-                return t, info
-        except Exception:
-            pass
-        time.sleep(delay * (attempt + 1))
-    return None, {}
+# ── NSE/BSE Direct API Headers ──
+NSE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.nseindia.com/",
+}
 
 @st.cache_data(ttl=300)
-def search_ticker(query):
-    indian_map = {
-        "tata steel": "TATASTEEL.NS", "jswsteel": "JSWSTEEL.NS", "jsw steel": "JSWSTEEL.NS",
-        "sail": "SAIL.NS", "reliance": "RELIANCE.NS", "infosys": "INFY.NS",
-        "tcs": "TCS.NS", "hdfc bank": "HDFCBANK.NS", "icici bank": "ICICIBANK.NS",
-        "wipro": "WIPRO.NS", "ongc": "ONGC.NS", "coal india": "COALINDIA.NS",
-        "sun pharma": "SUNPHARMA.NS", "bajaj finance": "BAJFINANCE.NS",
-        "asian paints": "ASIANPAINT.NS", "maruti": "MARUTI.NS",
-        "jindal steel": "JINDALSTEL.NS", "apl apollo": "APLAPOLLO.NS",
-        "hindalco": "HINDALCO.NS", "vedanta": "VEDL.NS",
-    }
-    q = query.lower().strip()
-    if q in indian_map:
-        return indian_map[q]
-    for suffix in [".NS", ".BO", "", ".L"]:
-        try:
-            candidate = query.upper() + suffix
-            _, info = _safe_get_info(candidate, retries=2, delay=1)
-            if info:
-                return candidate
-        except:
-            pass
-        time.sleep(0.5)
+def get_nse_quote(symbol):
+    """Fetch live quote from NSE India"""
+    try:
+        session = requests.Session()
+        session.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=5)
+        url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
+        r = session.get(url, headers=NSE_HEADERS, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            pd_data = data.get("priceInfo", {})
+            meta = data.get("metadata", {})
+            info_data = data.get("securityInfo", {})
+            price = pd_data.get("lastPrice")
+            prev  = pd_data.get("previousClose") or price
+            change_pct = ((price - prev) / prev * 100) if prev and price else 0
+            return {
+                "ticker":         symbol + ".NS",
+                "name":           meta.get("companyName", symbol),
+                "price":          price,
+                "prev_close":     prev,
+                "change_pct":     round(change_pct, 2),
+                "day_high":       pd_data.get("intraDayHighLow", {}).get("max"),
+                "day_low":        pd_data.get("intraDayHighLow", {}).get("min"),
+                "week_52_high":   pd_data.get("weekHighLow", {}).get("max"),
+                "week_52_low":    pd_data.get("weekHighLow", {}).get("min"),
+                "volume":         data.get("marketDeptOrderBook", {}).get("tradeInfo", {}).get("totalTradedVolume"),
+                "avg_volume":     None,
+                "market_cap":     None,
+                "pe_ratio":       info_data.get("pdSymbolPe"),
+                "pb_ratio":       None,
+                "revenue_growth": 0,
+                "profit_margin":  0,
+                "debt_to_equity": None,
+                "current_ratio":  None,
+                "roe":            0,
+                "eps":            None,
+                "dividend_yield": 0,
+                "analyst_rating": "",
+                "target_price":   None,
+                "sector":         meta.get("industry", ""),
+                "industry":       meta.get("industry", ""),
+                "currency":       "INR",
+                "exchange":       "NSE",
+                "beta":           None,
+            }
+    except Exception:
+        pass
     return None
 
 @st.cache_data(ttl=300)
-def get_stock_info(ticker):
+def get_nse_historical(symbol, days=365):
+    """Fetch historical data from NSE"""
     try:
-        t, info = _safe_get_info(ticker, retries=3, delay=2)
+        session = requests.Session()
+        session.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=5)
+        end   = datetime.now()
+        start = end - timedelta(days=days)
+        url = (
+            f"https://www.nseindia.com/api/historical/cm/equity"
+            f"?symbol={symbol}"
+            f"&series=[%22EQ%22]"
+            f"&from={start.strftime('%d-%m-%Y')}"
+            f"&to={end.strftime('%d-%m-%Y')}"
+        )
+        r = session.get(url, headers=NSE_HEADERS, timeout=8)
+        if r.status_code == 200:
+            rows = r.json().get("data", [])
+            if rows:
+                df = pd.DataFrame(rows)
+                df["Date"]  = pd.to_datetime(df["CH_TIMESTAMP"])
+                df["Open"]  = df["CH_OPENING_PRICE"].astype(float)
+                df["High"]  = df["CH_TRADE_HIGH_PRICE"].astype(float)
+                df["Low"]   = df["CH_TRADE_LOW_PRICE"].astype(float)
+                df["Close"] = df["CH_CLOSING_PRICE"].astype(float)
+                df["Volume"]= df["CH_TOT_TRADED_QTY"].astype(float)
+                df.set_index("Date", inplace=True)
+                df.sort_index(inplace=True)
+                return df[["Open","High","Low","Close","Volume"]].dropna()
+    except Exception:
+        pass
+    return None
+
+# ── yfinance fallback for non-Indian stocks ──
+def _yf_get_info(ticker, retries=3, delay=2):
+    import yfinance as yf
+    for attempt in range(retries):
+        try:
+            t    = yf.Ticker(ticker)
+            info = t.info
+            if info and (info.get("regularMarketPrice") or info.get("currentPrice") or info.get("previousClose")):
+                return info
+        except Exception:
+            pass
+        time.sleep(delay * (attempt + 1))
+    return {}
+
+@st.cache_data(ttl=300)
+def get_stock_info(ticker):
+    """Route Indian tickers to NSE, others to yfinance"""
+    # ── Indian stocks → NSE direct ──
+    if ticker.endswith(".NS") or ticker.endswith(".BO"):
+        symbol = ticker.replace(".NS","").replace(".BO","")
+        result = get_nse_quote(symbol)
+        if result:
+            return result
+        # fallback to yfinance if NSE fails
+    # ── Global stocks → yfinance ──
+    try:
+        import yfinance as yf
+        info = _yf_get_info(ticker)
         if not info:
             return None
-
         price = info.get("regularMarketPrice") or info.get("currentPrice") or info.get("previousClose")
         prev  = info.get("previousClose") or price
         if not price:
             return None
-
         change_pct = ((price - prev) / prev * 100) if prev and price else 0
-
         return {
             "ticker":         ticker,
             "name":           info.get("longName") or info.get("shortName", ticker),
@@ -84,7 +157,7 @@ def get_stock_info(ticker):
             "target_price":   info.get("targetMeanPrice"),
             "sector":         info.get("sector", ""),
             "industry":       info.get("industry", ""),
-            "currency":       info.get("currency", "INR"),
+            "currency":       info.get("currency", "USD"),
             "exchange":       info.get("exchange", ""),
             "beta":           info.get("beta"),
         }
@@ -93,27 +166,105 @@ def get_stock_info(ticker):
 
 @st.cache_data(ttl=600)
 def get_historical_data(ticker, period="5y", interval="1wk"):
+    """Route Indian tickers to NSE historical, others to yfinance"""
+    if ticker.endswith(".NS") or ticker.endswith(".BO"):
+        symbol = ticker.replace(".NS","").replace(".BO","")
+        days_map = {"1mo":30,"3mo":90,"6mo":180,"1y":365,"2y":730,"5y":1825}
+        days = days_map.get(period, 365)
+        df = get_nse_historical(symbol, days=days)
+        if df is not None and not df.empty:
+            return df
+    # fallback yfinance
     try:
-        t = yf.Ticker(ticker)
+        import yfinance as yf
+        t  = yf.Ticker(ticker)
         df = t.history(period=period, interval=interval)
         if df.empty:
             return None
         df.index = pd.to_datetime(df.index)
-        return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+        return df[["Open","High","Low","Close","Volume"]].dropna()
     except:
         return None
 
 @st.cache_data(ttl=120)
 def get_intraday_data(ticker):
+    """Intraday data — NSE for Indian, yfinance for others"""
+    if ticker.endswith(".NS") or ticker.endswith(".BO"):
+        symbol = ticker.replace(".NS","").replace(".BO","")
+        try:
+            session = requests.Session()
+            session.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=5)
+            url = f"https://www.nseindia.com/api/chart-databyindex?index={symbol}EQN"
+            r   = session.get(url, headers=NSE_HEADERS, timeout=8)
+            if r.status_code == 200:
+                raw = r.json().get("grapthData", [])
+                if raw:
+                    df = pd.DataFrame(raw, columns=["Timestamp","Close"])
+                    df["Timestamp"] = pd.to_datetime(df["Timestamp"], unit="ms")
+                    df.set_index("Timestamp", inplace=True)
+                    df["Open"]   = df["Close"]
+                    df["High"]   = df["Close"]
+                    df["Low"]    = df["Close"]
+                    df["Volume"] = 0
+                    return df[["Open","High","Low","Close","Volume"]]
+        except Exception:
+            pass
     try:
-        t = yf.Ticker(ticker)
+        import yfinance as yf
+        t  = yf.Ticker(ticker)
         df = t.history(period="1d", interval="5m")
         if df.empty:
             return None
         df.index = pd.to_datetime(df.index)
-        return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+        return df[["Open","High","Low","Close","Volume"]].dropna()
     except:
         return None
+
+@st.cache_data(ttl=300)
+def search_ticker(query):
+    """Search ticker — check NSE first for Indian stocks"""
+    indian_map = {
+        "tata steel": "TATASTEEL.NS", "jswsteel": "JSWSTEEL.NS", "jsw steel": "JSWSTEEL.NS",
+        "sail": "SAIL.NS", "reliance": "RELIANCE.NS", "infosys": "INFY.NS",
+        "tcs": "TCS.NS", "hdfc bank": "HDFCBANK.NS", "icici bank": "ICICIBANK.NS",
+        "wipro": "WIPRO.NS", "ongc": "ONGC.NS", "coal india": "COALINDIA.NS",
+        "sun pharma": "SUNPHARMA.NS", "bajaj finance": "BAJFINANCE.NS",
+        "asian paints": "ASIANPAINT.NS", "maruti": "MARUTI.NS",
+        "jindal steel": "JINDALSTEL.NS", "apl apollo": "APLAPOLLO.NS",
+        "hindalco": "HINDALCO.NS", "vedanta": "VEDL.NS",
+    }
+    q = query.lower().strip()
+    if q in indian_map:
+        return indian_map[q]
+
+    # Try NSE search
+    try:
+        session = requests.Session()
+        session.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=5)
+        url = f"https://www.nseindia.com/api/search-autocomplete?q={query}"
+        r   = session.get(url, headers=NSE_HEADERS, timeout=5)
+        if r.status_code == 200:
+            results = r.json().get("symbols", [])
+            if results:
+                sym = results[0].get("symbol")
+                if sym:
+                    return sym + ".NS"
+    except Exception:
+        pass
+
+    # yfinance fallback
+    import yfinance as yf
+    for suffix in [".NS", ".BO", "", ".L"]:
+        try:
+            candidate = query.upper() + suffix
+            t    = yf.Ticker(candidate)
+            info = t.info
+            if info and (info.get("regularMarketPrice") or info.get("currentPrice")):
+                return candidate
+        except:
+            pass
+        time.sleep(0.3)
+    return None
 
 def calculate_technicals(df):
     if df is None or len(df) < 20:
