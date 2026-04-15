@@ -88,7 +88,9 @@ def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers
                         <div class="index-value">{currency}{p:,.0f}</div>
                         <div style="font-size:0.72rem;color:{clr};font-weight:500;">{arr} {abs(chg):.2f}%</div>
                     </div>""", unsafe_allow_html=True)
-            time.sleep(0.3)
+                else:
+                    st.markdown(f'<div class="index-pill"><div class="index-name">{idx_name}</div><div style="color:#6B7280;font-size:0.8rem;">Unavailable</div></div>', unsafe_allow_html=True)
+            time.sleep(0.5)
 
         st.markdown('<div style="margin-top:1rem;"></div>', unsafe_allow_html=True)
 
@@ -131,7 +133,7 @@ def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers
             for ticker in watchlist:
                 info = get_stock_info(ticker)
                 if not info:
-                    st.markdown(f'<div style="font-size:0.8rem;color:#6B7280;padding:0.5rem;">⚠ Could not load {ticker}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:0.8rem;color:#6B7280;padding:0.5rem;">⚠ Could not load {ticker} — Yahoo Finance may be throttling. Try again in a moment.</div>', unsafe_allow_html=True)
                     continue
                 hist     = get_historical_data(ticker, period="1y")
                 tech     = calculate_technicals(hist) if hist is not None else {}
@@ -159,6 +161,8 @@ def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers
                     if st.button("✕", key=f"del_{ticker}_{market}"):
                         st.session_state[watchlist_key].remove(ticker)
                         st.rerun()
+                time.sleep(0.4)
+
             if gc_winners:
                 st.markdown(f"""
                 <div class="gc-winners-banner">
@@ -169,14 +173,13 @@ def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers
         # ── Top Auto Picks ──
         st.markdown('<div class="section-header">TODAY\'S TOP AUTO PICKS — FROM MARKET SCAN</div>', unsafe_allow_html=True)
         with st.spinner("Scanning market for top picks..."):
-            scan_tickers = tickers_fn()[:5]
+            scan_tickers = [t for t in tickers_fn()[:8] if t not in watchlist][:4]
             scored = []
             for t in scan_tickers:
-                if t in watchlist:
-                    continue
                 try:
                     info = get_stock_info(t)
                     if not info:
+                        time.sleep(1)
                         continue
                     hist = get_historical_data(t, period="6mo")
                     tech = calculate_technicals(hist) if hist is not None else {}
@@ -193,8 +196,9 @@ def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers
                     long_v  = score_to_decision(min(score + 8, 100), "GREEN")
                     scored.append((score, t, info, gc_s, short_v, long_v))
                 except Exception:
-                    continue
-                time.sleep(0.5)
+                    pass
+                time.sleep(0.8)
+
             scored.sort(reverse=True, key=lambda x: x[0])
             top_picks = scored[:3]
 
@@ -209,7 +213,7 @@ def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers
                         st.session_state.selected_market = market
                         st.rerun()
         else:
-            st.markdown('<div style="font-size:0.8rem;color:#6B7280;padding:0.5rem;">No picks available right now. Try refreshing.</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.8rem;color:#6B7280;padding:0.5rem;">⚠ Could not load picks right now — Yahoo Finance may be throttling. Please wait a moment and refresh.</div>', unsafe_allow_html=True)
 
     with port_col:
         st.markdown('<div class="portfolio-card">', unsafe_allow_html=True)
