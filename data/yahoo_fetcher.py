@@ -5,16 +5,21 @@ from datetime import datetime, timedelta
 import time
 import streamlit as st
 
+def _safe_get_info(ticker, retries=3, delay=2):
+    """Fetch yfinance info with retry and backoff"""
+    for attempt in range(retries):
+        try:
+            t = yf.Ticker(ticker)
+            info = t.info
+            if info and (info.get("regularMarketPrice") or info.get("currentPrice") or info.get("previousClose")):
+                return t, info
+        except Exception:
+            pass
+        time.sleep(delay * (attempt + 1))
+    return None, {}
+
 @st.cache_data(ttl=300)
 def search_ticker(query):
-    """Search for ticker by company name or ticker symbol"""
-    try:
-        ticker = yf.Ticker(query)
-        info = ticker.fast_info
-        if info and hasattr(info, 'last_price') and info.last_price:
-            return query.upper()
-    except:
-        pass
     indian_map = {
         "tata steel": "TATASTEEL.NS", "jswsteel": "JSWSTEEL.NS", "jsw steel": "JSWSTEEL.NS",
         "sail": "SAIL.NS", "reliance": "RELIANCE.NS", "infosys": "INFY.NS",
@@ -28,44 +33,26 @@ def search_ticker(query):
     q = query.lower().strip()
     if q in indian_map:
         return indian_map[q]
-    for suffix in [".NS", ".BO", ""]:
+    for suffix in [".NS", ".BO", "", ".L"]:
         try:
-            t = yf.Ticker(query.upper() + suffix)
-            fi = t.fast_info
-            if fi and hasattr(fi, 'last_price') and fi.last_price:
-                return query.upper() + suffix
+            candidate = query.upper() + suffix
+            _, info = _safe_get_info(candidate, retries=2, delay=1)
+            if info:
+                return candidate
         except:
             pass
-        time.sleep(0.2)
+        time.sleep(0.5)
     return None
 
 @st.cache_data(ttl=300)
 def get_stock_info(ticker):
-    """Get comprehensive stock information"""
     try:
-        t = yf.Ticker(ticker)
-        try:
-            info = t.info
-        except Exception:
-            info = {}
-        fi = t.fast_info
+        t, info = _safe_get_info(ticker, retries=3, delay=2)
+        if not info:
+            return None
 
-        price = None
-        try:
-            price = fi.last_price
-        except:
-            pass
-        if not price:
-            price = info.get("regularMarketPrice") or info.get("currentPrice") or info.get("previousClose")
-
-        prev = None
-        try:
-            prev = fi.previous_close
-        except:
-            pass
-        if not prev:
-            prev = info.get("previousClose") or price
-
+        price = info.get("regularMarketPrice") or info.get("currentPrice") or info.get("previousClose")
+        prev  = info.get("previousClose") or price
         if not price:
             return None
 
@@ -106,7 +93,6 @@ def get_stock_info(ticker):
 
 @st.cache_data(ttl=600)
 def get_historical_data(ticker, period="5y", interval="1wk"):
-    """Get historical price data for charting"""
     try:
         t = yf.Ticker(ticker)
         df = t.history(period=period, interval=interval)
@@ -119,7 +105,6 @@ def get_historical_data(ticker, period="5y", interval="1wk"):
 
 @st.cache_data(ttl=120)
 def get_intraday_data(ticker):
-    """Get intraday data (5-minute, last 1 day)"""
     try:
         t = yf.Ticker(ticker)
         df = t.history(period="1d", interval="5m")
@@ -131,7 +116,6 @@ def get_intraday_data(ticker):
         return None
 
 def calculate_technicals(df):
-    """Calculate RSI and Moving Averages from price data"""
     if df is None or len(df) < 20:
         return {}
     close = df["Close"]
