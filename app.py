@@ -1,6 +1,6 @@
-
 import streamlit as st
 import sys, os
+import time
 sys.path.insert(0, os.path.dirname(__file__))
 
 st.set_page_config(
@@ -61,7 +61,6 @@ tab_india, tab_us, tab_uk, tab_gc, tab_alerts, tab_settings = st.tabs([
 def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers):
     watchlist = st.session_state[watchlist_key]
 
-    # ── If a stock is selected show full analysis ──
     if st.session_state.selected_stock and st.session_state.selected_market == market:
         if st.button("← Back to Market", key=f"back_{market}"):
             st.session_state.selected_stock = None
@@ -89,8 +88,8 @@ def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers
                         <div class="index-value">{currency}{p:,.0f}</div>
                         <div style="font-size:0.72rem;color:{clr};font-weight:500;">{arr} {abs(chg):.2f}%</div>
                     </div>""", unsafe_allow_html=True)
+            time.sleep(0.3)
 
-        # ── GC Winners Banner ──
         st.markdown('<div style="margin-top:1rem;"></div>', unsafe_allow_html=True)
 
         # ── Search & Add ──
@@ -160,7 +159,6 @@ def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers
                     if st.button("✕", key=f"del_{ticker}_{market}"):
                         st.session_state[watchlist_key].remove(ticker)
                         st.rerun()
-            # GC Winners banner
             if gc_winners:
                 st.markdown(f"""
                 <div class="gc-winners-banner">
@@ -171,28 +169,35 @@ def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers
         # ── Top Auto Picks ──
         st.markdown('<div class="section-header">TODAY\'S TOP AUTO PICKS — FROM MARKET SCAN</div>', unsafe_allow_html=True)
         with st.spinner("Scanning market for top picks..."):
-            scan_tickers = tickers_fn()[:20]
+            scan_tickers = tickers_fn()[:5]
             scored = []
             for t in scan_tickers:
-                if t in watchlist: continue
-                info = get_stock_info(t)
-                if not info: continue
-                hist = get_historical_data(t, period="6mo")
-                tech = calculate_technicals(hist) if hist is not None else {}
-                gc_s, _ = calculate_gc_status(t, info.get("sector",""))
-                metrics = {
-                    "revenue_growth": info.get("revenue_growth"),
-                    "profit_margin":  info.get("profit_margin"),
-                    "debt_to_equity": info.get("debt_to_equity"),
-                    "rsi":            tech.get("rsi"),
-                    "pe_ratio":       info.get("pe_ratio"),
-                }
-                score   = calculate_score(metrics)
-                short_v = score_to_decision(score, gc_s)
-                long_v  = score_to_decision(min(score + 8, 100), "GREEN")
-                scored.append((score, t, info, gc_s, short_v, long_v))
+                if t in watchlist:
+                    continue
+                try:
+                    info = get_stock_info(t)
+                    if not info:
+                        continue
+                    hist = get_historical_data(t, period="6mo")
+                    tech = calculate_technicals(hist) if hist is not None else {}
+                    gc_s, _ = calculate_gc_status(t, info.get("sector",""))
+                    metrics = {
+                        "revenue_growth": info.get("revenue_growth"),
+                        "profit_margin":  info.get("profit_margin"),
+                        "debt_to_equity": info.get("debt_to_equity"),
+                        "rsi":            tech.get("rsi"),
+                        "pe_ratio":       info.get("pe_ratio"),
+                    }
+                    score   = calculate_score(metrics)
+                    short_v = score_to_decision(score, gc_s)
+                    long_v  = score_to_decision(min(score + 8, 100), "GREEN")
+                    scored.append((score, t, info, gc_s, short_v, long_v))
+                except Exception:
+                    continue
+                time.sleep(0.5)
             scored.sort(reverse=True, key=lambda x: x[0])
-            top_picks = scored[:5]
+            top_picks = scored[:3]
+
         if top_picks:
             for score, ticker, info, gc_s, sv, lv in top_picks:
                 c1, c2 = st.columns([9, 1])
@@ -203,6 +208,8 @@ def render_market_tab(market, watchlist_key, tickers_fn, currency, index_tickers
                         st.session_state.selected_stock  = ticker
                         st.session_state.selected_market = market
                         st.rerun()
+        else:
+            st.markdown('<div style="font-size:0.8rem;color:#6B7280;padding:0.5rem;">No picks available right now. Try refreshing.</div>', unsafe_allow_html=True)
 
     with port_col:
         st.markdown('<div class="portfolio-card">', unsafe_allow_html=True)
@@ -333,4 +340,3 @@ with tab_settings:
         Always consult a qualified financial advisor before making investment decisions. 
         Past performance does not guarantee future results.
     </div>""", unsafe_allow_html=True)
-
