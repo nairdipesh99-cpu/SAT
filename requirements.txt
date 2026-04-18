@@ -1,11 +1,24 @@
-streamlit
-yfinance==0.2.40
-plotly
-pandas
-numpy
-requests
-feedparser
-beautifulsoup4
-anthropic
-python-dateutil
-pytz
+# ─── Core Framework ─────────────────────────────────────────────────────────
+streamlit>=1.32.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.18.0
+
+# ─── NSE Data Sources (pick one or both) ────────────────────────────────────
+jugaad-data>=0.28.2       # Primary: jugaad-data for NSE historical prices
+nselib>=1.0.3             # Fallback: nselib NSE data
+
+# ─── AI / NLP ────────────────────────────────────────────────────────────────
+transformers>=4.38.0      # FinBERT sentiment model
+torch>=2.0.0              # PyTorch backend for FinBERT
+sentencepiece>=0.1.99     # Tokenizer support
+
+# ─── Financial Data APIs ─────────────────────────────────────────────────────
+requests>=2.31.0          # HTTP for FMP / Finnhub REST APIs
+
+# ─── AI Research ─────────────────────────────────────────────────────────────
+tavily-python>=0.3.3      # Tavily AI search for project/contract research
+
+# ─── Utilities ───────────────────────────────────────────────────────────────
+python-dateutil>=2.8.2
+pytz>=2024.1
