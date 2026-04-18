@@ -78,9 +78,46 @@ st.markdown("""
     border-radius: 8px;
     padding: 12px 16px;
     margin: 8px 0;
+    transition: border-color 0.18s, background 0.18s;
   }
+  a.news-card-link {
+    display: block;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 8px 0;
+    text-decoration: none;
+    transition: border-color 0.18s, background 0.18s;
+  }
+  a.news-card-link:hover {
+    border-color: #58a6ff;
+    background: #1c2128;
+    cursor: pointer;
+  }
+  a.news-card-link:hover .news-title { color: #79c0ff; }
+  .news-link-icon { float: right; font-size: 11px; color: #58a6ff; margin-left: 6px; opacity: 0.7; }
   .news-title { font-size: 13px; color: #e6edf3; font-weight: 500; line-height: 1.5; }
   .news-meta  { font-size: 11px; color: #8b949e; margin-top: 4px; }
+
+  /* ── Project Cards ── */
+  a.project-card-link {
+    display: block;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-left: 3px solid #3fb950;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 8px 0;
+    text-decoration: none;
+    transition: border-color 0.18s, background 0.18s;
+  }
+  a.project-card-link:hover {
+    border-color: #3fb950;
+    background: #1c2128;
+    cursor: pointer;
+  }
+  a.project-card-link:hover .news-title { color: #56d364; }
 
   /* ── Sentiment Badges ── */
   .badge {
@@ -529,35 +566,64 @@ def fetch_news_finnhub(symbol: str, api_key: str) -> List[Dict]:
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, list) and len(data) > 0:
-                return data[:10]
+                # Ensure every item has a non-empty url field
+                cleaned = []
+                for item in data[:10]:
+                    url = item.get("url", "")
+                    if not url:
+                        query = requests.utils.quote(item.get("headline", symbol) + " NSE India")
+                        url = f"https://news.google.com/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
+                    item["url"] = url
+                    cleaned.append(item)
+                return cleaned
     except Exception:
         pass
     return _synthetic_news(symbol)
 
 
 def _synthetic_news(symbol: str) -> List[Dict]:
+    """
+    When no Finnhub key is provided, generate placeholder headlines
+    and point each one to a live Google News search for that exact headline —
+    so clicking always opens a real news page.
+    """
     templates = [
-        f"{symbol} secures ₹2,400 Cr infra development contract from NHAI",
-        f"Analysts upgrade {symbol} to BUY; target price raised by 18%",
-        f"{symbol} Q3 PAT beats estimates by 12%; margins expand 80bps",
-        f"Board approves ₹3,000 Cr capex plan for FY26 expansion — {symbol}",
-        f"PLI scheme disbursement boosts {symbol} order book outlook",
-        f"{symbol} wins 5-year government IT services renewal contract",
-        f"FII buying interest rises in {symbol} amid sector re-rating",
-        f"{symbol} announces JV with global MNC for green energy projects",
-        f"Credit rating upgraded to AA+ for {symbol} long-term bonds",
-        f"RBI policy stance positive for {symbol} net interest margins",
+        f"{symbol} secures infra development contract from NHAI",
+        f"Analysts upgrade {symbol} to BUY target price raised",
+        f"{symbol} Q3 PAT beats estimates margins expand",
+        f"Board approves capex plan for FY26 expansion {symbol}",
+        f"PLI scheme disbursement boosts {symbol} order book",
+        f"{symbol} wins government IT services renewal contract",
+        f"FII buying interest rises in {symbol} sector re-rating",
+        f"{symbol} announces JV global MNC green energy projects",
+        f"Credit rating upgraded for {symbol} long-term bonds",
+        f"RBI policy stance positive {symbol} net interest margins",
+    ]
+    sources = ["ET Markets", "Moneycontrol", "Business Standard", "Mint", "CNBC-TV18"]
+    source_urls = [
+        "https://economictimes.indiatimes.com/markets",
+        "https://www.moneycontrol.com/news/business/stocks/",
+        "https://www.business-standard.com/markets",
+        "https://www.livemint.com/market",
+        "https://www.cnbctv18.com/market/",
     ]
     now = datetime.now()
-    return [
-        {
-            "headline": templates[i % len(templates)],
+    result = []
+    for i in range(8):
+        headline = templates[i % len(templates)]
+        # Google News search URL — always opens real news
+        search_url = (
+            "https://news.google.com/search?q="
+            + requests.utils.quote(headline + " NSE India")
+            + "&hl=en-IN&gl=IN&ceid=IN:en"
+        )
+        result.append({
+            "headline": headline,
             "datetime": int((now - timedelta(hours=i * 8)).timestamp()),
-            "source": ["ET Markets", "Moneycontrol", "Business Standard", "Mint", "CNBC-TV18"][i % 5],
-            "url": "#",
-        }
-        for i in range(8)
-    ]
+            "source":   sources[i % 5],
+            "url":      search_url,
+        })
+    return result
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1483,28 +1549,44 @@ def render_metric_card(label: str, value: str, delta: Optional[str] = None, delt
     </div>""", unsafe_allow_html=True)
 
 
-def render_news_card(headline: str, source: str, ts: int, badge: str):
+def render_news_card(headline: str, source: str, ts: int, badge: str, url: str = ""):
     badge_map = {
-        "positive": ("badge-pos", "● Positive"),
-        "negative": ("badge-neg", "● Negative"),
-        "neutral":  ("badge-neu", "● Neutral"),
+        "positive": ("badge-pos", "&#9679; Positive"),
+        "negative": ("badge-neg", "&#9679; Negative"),
+        "neutral":  ("badge-neu", "&#9679; Neutral"),
     }
-    cls, label = badge_map.get(badge, ("badge-neu", "● Neutral"))
+    cls, label = badge_map.get(badge, ("badge-neu", "&#9679; Neutral"))
     dt_str = datetime.fromtimestamp(ts).strftime("%d %b %H:%M") if ts else "Recent"
-    st.markdown(f"""
-    <div class="news-card">
-      <div class="news-title">{headline}<span class="badge {cls}">{label}</span></div>
-      <div class="news-meta">{source} &nbsp;·&nbsp; {dt_str}</div>
-    </div>""", unsafe_allow_html=True)
+
+    has_url = url and url not in ("#", "", "None")
+    tag_open  = '<a class="news-card-link" href="' + url + '" target="_blank" rel="noopener noreferrer">' if has_url else '<div class="news-card">'
+    tag_close = "</a>" if has_url else "</div>"
+    ext_icon  = '<span class="news-link-icon">&#8599;</span>' if has_url else ""
+
+    html = (
+        tag_open
+        + '<div class="news-title">' + ext_icon + headline
+        + '<span class="badge ' + cls + '">' + label + "</span></div>"
+        + '<div class="news-meta">' + source + " &nbsp;&middot;&nbsp; " + dt_str + "</div>"
+        + tag_close
+    )
+    st.markdown(html, unsafe_allow_html=True)
 
 
-def render_project_card(title: str, content: str, date_str: str):
-    st.markdown(f"""
-    <div class="news-card" style="border-left: 3px solid #3fb950;">
-      <div class="news-title">🏗️ {title}</div>
-      <div class="news-meta" style="margin-top:6px; color:#c9d1d9;">{content}</div>
-      <div class="news-meta" style="margin-top:4px;">📅 {date_str}</div>
-    </div>""", unsafe_allow_html=True)
+def render_project_card(title: str, content: str, date_str: str, url: str = ""):
+    has_url  = url and url not in ("#", "", "None")
+    tag_open = ('<a class="project-card-link" href="' + url + '" target="_blank" rel="noopener noreferrer">') if has_url else '<div class="news-card" style="border-left:3px solid #3fb950;">'
+    tag_close= "</a>" if has_url else "</div>"
+    ext_icon = '<span class="news-link-icon">&#8599;</span>' if has_url else ""
+
+    html = (
+        tag_open
+        + '<div class="news-title">&#x1F3D7;&#xFE0F; ' + ext_icon + title + "</div>"
+        + '<div class="news-meta" style="margin-top:6px;color:#c9d1d9;">' + content + "</div>"
+        + '<div class="news-meta" style="margin-top:4px;">&#128197; ' + date_str + "</div>"
+        + tag_close
+    )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_master_score(master: Dict):
@@ -1781,6 +1863,7 @@ def main():
                 proj.get("title", ""),
                 proj.get("content", ""),
                 proj.get("published_date", "Recent"),
+                proj.get("url", ""),
             )
 
         st.markdown("**FinBERT News Sentiment**")
@@ -1790,6 +1873,7 @@ def main():
                 news_item.get("source", ""),
                 news_item.get("datetime", 0),
                 sent.get("label", "neutral"),
+                news_item.get("url", ""),
             )
 
     # ── COLUMN 4 : 5-Year Deep Dive ──────────────────────────────────────────
