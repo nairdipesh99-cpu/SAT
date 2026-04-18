@@ -35,7 +35,9 @@ st.markdown("""
   /* ── Core dark background ── */
   .stApp { background: #0d1117; color: #e6edf3; }
   section[data-testid="stSidebar"] { background: #161b22 !important; border-right: 1px solid #30363d; }
-  div[data-testid="stToolbar"] { display: none; }
+  /* hide only deploy/share buttons, keep sidebar toggle visible */
+  div[data-testid="stToolbar"] button:not([data-testid="collapsedControl"]) { display: none; }
+  button[data-testid="collapsedControl"] { color: #58a6ff !important; }
 
   /* ── Typography ── */
   h1, h2, h3, h4 { color: #e6edf3 !important; font-family: 'Inter', sans-serif; }
@@ -131,6 +133,46 @@ st.markdown("""
   .badge-pos  { background: #1f4a2e; color: #3fb950; border: 1px solid #3fb950; }
   .badge-neg  { background: #3d1c1c; color: #f85149; border: 1px solid #f85149; }
   .badge-neu  { background: #232a35; color: #58a6ff; border: 1px solid #58a6ff; }
+
+  /* ── Watchlist ── */
+  .watchlist-card {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 10px; padding: 14px 18px; margin: 6px 0;
+    display: flex; align-items: center; justify-content: space-between;
+    transition: border-color 0.15s;
+  }
+  .watchlist-card:hover { border-color: #58a6ff; }
+  .wl-symbol { font-size:15px; font-weight:700; color:#e6edf3; }
+  .wl-name   { font-size:11px; color:#8b949e; margin-top:2px; }
+  .wl-price  { font-size:18px; font-weight:700; }
+  .wl-chg    { font-size:12px; font-weight:600; }
+
+  /* ── Global Crisis ── */
+  .crisis-card {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 10px; padding: 14px 18px; margin: 6px 0;
+  }
+  .crisis-label { font-size:11px; color:#8b949e; text-transform:uppercase; letter-spacing:.05em; }
+  .crisis-value { font-size:22px; font-weight:700; margin: 4px 0; }
+  .crisis-status{ font-size:11px; font-weight:600; margin-top:2px; }
+  .crisis-extreme { border-left: 3px solid #f85149; }
+  .crisis-high    { border-left: 3px solid #f0883e; }
+  .crisis-moderate{ border-left: 3px solid #e3b341; }
+  .crisis-low     { border-left: 3px solid #3fb950; }
+
+  /* ── Opportunity Card ── */
+  .opp-card {
+    background: #161b22; border: 1px solid #30363d;
+    border-left: 3px solid #3fb950;
+    border-radius: 10px; padding: 14px 18px; margin: 8px 0;
+  }
+  .opp-card.caution { border-left-color: #e3b341; }
+  .opp-symbol { font-size:14px; font-weight:700; color:#e6edf3; }
+  .opp-reason { font-size:11px; color:#8b949e; margin-top:3px; line-height:1.5; }
+  .opp-verdict{ font-size:11px; font-weight:600; margin-top:5px; }
+
+  /* ── Tab styling ── */
+  .stTabs [data-baseweb="tab"] { font-size:13px !important; padding: 8px 18px !important; }
 
   /* ── Score Gauge ── */
   .score-container {
@@ -1710,7 +1752,124 @@ def render_sidebar() -> Tuple[str, str, str, str]:
 # MAIN APP
 # ══════════════════════════════════════════════════════════════════════════════
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GLOBAL CRISIS DATA
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_global_indicators() -> Dict:
+    """Fetch real-time global market stress indicators."""
+    indicators = {}
+
+    # Fear & Greed Index (alternative.me - free, no key)
+    try:
+        r = requests.get("https://api.alternative.me/fng/?limit=1", timeout=6)
+        if r.status_code == 200:
+            d = r.json()["data"][0]
+            indicators["fear_greed"] = {
+                "value": int(d["value"]),
+                "label": d["value_classification"],
+            }
+    except Exception:
+        indicators["fear_greed"] = {"value": 45, "label": "Fear"}
+
+    # Gold, Oil, USD/INR, US10Y via Yahoo Finance public API
+    symbols_map = {
+        "GC=F":    "gold",
+        "CL=F":    "oil",
+        "USDINR=X":"usdinr",
+        "^TNX":    "us10y",
+        "^FTSE":   "ftse",
+        "^N225":   "nikkei",
+    }
+    for sym, key in symbols_map.items():
+        try:
+            r = requests.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}",
+                params={"interval":"1d","range":"5d"},
+                headers={"User-Agent":"Mozilla/5.0"},
+                timeout=6,
+            )
+            if r.status_code == 200:
+                meta  = r.json()["chart"]["result"][0]["meta"]
+                price = meta.get("regularMarketPrice", 0)
+                prev  = meta.get("previousClose", price)
+                chg   = round((price / prev - 1) * 100, 2) if prev else 0
+                indicators[key] = {"price": round(price, 2), "chg": chg}
+        except Exception:
+            pass
+
+    # India VIX
+    indicators["india_vix"] = {"price": fetch_india_vix(), "chg": 0}
+    return indicators
+
+
+CRISIS_OPPORTUNITY_STOCKS = [
+    # Format: (symbol, reason, crisis_type)
+    ("HINDUNILVR", "Defensive FMCG — outperforms in risk-off markets",       "defensive"),
+    ("ITC",        "High dividend yield, low volatility — safe haven",         "defensive"),
+    ("SUNPHARMA",  "Pharma demand non-cyclical, USD revenues hedge INR",       "defensive"),
+    ("DRREDDY",    "Export-driven Pharma — benefits from USD strength",        "defensive"),
+    ("NESTLEIND",  "Staples pricing power, insulated from market cycles",      "defensive"),
+    ("CIPLA",      "Domestic pharma, government supply contracts — stable",    "defensive"),
+    ("TCS",        "USD earner — INR depreciation boosts profits",             "currency"),
+    ("INFY",       "80% revenues in USD/EUR — natural INR hedge",              "currency"),
+    ("WIPRO",      "Global IT — earnings rise when INR falls vs USD",          "currency"),
+    ("HCLTECH",    "Dollar-denominated contracts insulate from local risks",   "currency"),
+    ("NTPC",       "Government-backed power — essential services floor",       "infra"),
+    ("POWERGRID",  "Regulated utility — stable cash flows regardless of cycle","infra"),
+    ("COALINDIA",  "Commodity supply — energy crisis drives coal demand up",   "commodity"),
+    ("ONGC",       "Oil price surge benefits upstream E&P revenues",           "commodity"),
+]
+
+
+def get_crisis_opportunity_stocks(indicators: Dict) -> List[Dict]:
+    """Score and rank crisis opportunity stocks based on current global conditions."""
+    fg = indicators.get("fear_greed", {}).get("value", 50)
+    vix = indicators.get("india_vix", {}).get("price", 15)
+    oil = indicators.get("oil", {}).get("chg", 0)
+    usdinr = indicators.get("usdinr", {}).get("chg", 0)
+
+    results = []
+    for symbol, reason, crisis_type in CRISIS_OPPORTUNITY_STOCKS:
+        score = 0
+        if crisis_type == "defensive" and (fg < 40 or vix > 18):
+            score += 30
+        if crisis_type == "currency" and usdinr > 0.2:
+            score += 25
+        if crisis_type == "commodity" and oil > 1.0:
+            score += 20
+        if crisis_type == "infra":
+            score += 15
+
+        # Sentiment boost
+        if fg < 25: score += 15   # extreme fear = defensive plays shine
+        if vix > 22: score += 10  # defensive mode active
+
+        results.append({
+            "symbol":      symbol,
+            "reason":      reason,
+            "crisis_type": crisis_type,
+            "score":       score,
+            "verdict":     "STRONG BUY" if score >= 50 else "BUY" if score >= 30 else "ACCUMULATE",
+        })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results[:8]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN APP
+# ══════════════════════════════════════════════════════════════════════════════
+
 def main():
+    # ── Session state init ────────────────────────────────────────────────────
+    if "watchlist" not in st.session_state:
+        st.session_state.watchlist = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "SBIN"]
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = 0
+
     symbol, fmp_key, finnhub_key, tavily_key, anthropic_key = render_sidebar()
 
     sector_name = _get_sector(symbol)
@@ -1718,212 +1877,394 @@ def main():
 
     # ── Regime Banner ─────────────────────────────────────────────────────────
     if vix > 22:
-        st.markdown(f"""
-        <div class="regime-defensive">
-          ⚠️ DEFENSIVE MODE ACTIVE — India VIX at {vix:.1f}
-          (Threshold: 22). Prioritising FMCG / Pharma / Defensive sectors.
-          Reduce high-beta cyclical exposure.
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="regime-defensive">&#x26A0;&#xFE0F; DEFENSIVE MODE ACTIVE — India VIX at '
+            + str(round(vix, 1))
+            + '. Prioritising FMCG / Pharma / Defensive sectors. Reduce high-beta cyclical exposure.</div>',
+            unsafe_allow_html=True,
+        )
     else:
-        st.markdown(f"""
-        <div class="regime-normal">
-          ✅ Normal Market Regime — India VIX at {vix:.1f}.
-          Risk-on environment. Broad market participation expected.
-        </div>""", unsafe_allow_html=True)
-
-    # ── Header ────────────────────────────────────────────────────────────────
-    col_h1, col_h2 = st.columns([3, 1])
-    with col_h1:
-        st.markdown(f"## {symbol} &nbsp; <span style='font-size:16px;color:#8b949e;font-weight:400;'>NSE · {sector_name}</span>", unsafe_allow_html=True)
-    with col_h2:
-        st.caption(f"Last updated: {datetime.now().strftime('%d %b %Y, %H:%M IST')}")
-
-    # ── Data Fetch ────────────────────────────────────────────────────────────
-    with st.spinner("Fetching market data..."):
-        price_df     = fetch_nse_price_history(symbol, years=5)
-        fundamentals = fetch_fundamentals_fmp(symbol, fmp_key)
-        news         = fetch_news_finnhub(symbol, finnhub_key)
-        projects     = fetch_deep_research_tavily(symbol, tavily_key)
-        sentiments   = score_sentiment_finbert([n["headline"] for n in news])
-        technicals   = compute_technicals(price_df)
-        master       = compute_master_score(technicals, fundamentals, sentiments, vix)
-
-    # ── Live Price Metrics Strip ───────────────────────────────────────────────
-    close = price_df["CLOSE"]
-    current_price = close.iloc[-1]
-    prev_close    = close.iloc[-2]
-    day_chg       = (current_price / prev_close - 1) * 100
-    mtd_chg       = (current_price / close.tail(22).iloc[0] - 1) * 100
-    ytd_chg       = (current_price / close.tail(252).iloc[0] - 1) * 100
-
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    with m1:
-        render_metric_card("LTP (₹)", f"₹{current_price:,.1f}",
-                           f"{abs(day_chg):.2f}%", day_chg >= 0)
-    with m2:
-        render_metric_card("Day Change", f"{day_chg:+.2f}%", None, None)
-    with m3:
-        render_metric_card("MTD Return", f"{mtd_chg:+.1f}%", None, None)
-    with m4:
-        render_metric_card("YTD Return", f"{ytd_chg:+.1f}%", None, None)
-    with m5:
-        render_metric_card("52W High", f"₹{technicals['week52_high']:,.0f}",
-                           f"{technicals['pct_from_high']:.1f}% from high",
-                           technicals["pct_from_high"] >= -5)
-    with m6:
-        render_metric_card("5Y CAGR", f"{technicals['cagr_5y']}%",
-                           None, technicals["cagr_5y"] >= 10)
-
-    st.markdown("---")
-
-    # ── AI AGENT VERDICT ─────────────────────────────────────────────────────
-    has_key = bool(anthropic_key and anthropic_key.strip().startswith("sk-ant"))
-    with st.spinner("🧠 AI Agent is analysing all data..." if has_key else "⚙️ Generating rule-based verdict..."):
-        ai_verdict = call_ai_agent(
-            symbol        = symbol,
-            sector        = sector_name,
-            current_price = current_price,
-            day_chg       = day_chg,
-            technicals    = technicals,
-            fundamentals  = fundamentals,
-            master        = master,
-            news          = news,
-            sentiments    = sentiments,
-            projects      = projects,
-            vix           = vix,
-            anthropic_key = anthropic_key,
-        )
-    render_ai_verdict(ai_verdict, symbol, current_price, has_key)
-
-    st.markdown("---")
-
-    # ══ 4 COLUMNS ═════════════════════════════════════════════════════════════
-    col1, col2, col3, col4 = st.columns(4)
-
-    # ── COLUMN 1 : Govt & Macro ───────────────────────────────────────────────
-    with col1:
-        st.markdown(f"""<div class="col-header col-header-gov">
-          <div style="font-size:11px;color:#f78166;text-transform:uppercase;letter-spacing:.06em;">Col 1</div>
-          <div style="font-size:15px;font-weight:600;color:#e6edf3;margin-top:2px;">🏛 Govt & Macro</div>
-        </div>""", unsafe_allow_html=True)
-
-        policies = SECTOR_POLICY_MAP.get(sector_name, SECTOR_POLICY_MAP.get("General", ["Check DPIIT portal for latest schemes"]))
-        st.markdown("**Active PLI / Policy Schemes**")
-        for policy in policies:
-            st.markdown(f"""<div class="news-card" style="border-left: 3px solid #f78166;">
-              <div class="news-title">📌 {policy}</div>
-            </div>""", unsafe_allow_html=True)
-
-        st.markdown("**Macro Indicators**")
-        render_metric_card("India VIX",      f"{vix:.1f}",  None, None)
-        render_metric_card("Market Regime",
-                           "Defensive" if vix > 22 else "Normal",
-                           None, vix <= 22)
-        render_metric_card("RSI (14D)",      f"{technicals['rsi']:.1f}",
-                           "Overbought" if technicals["rsi"] > 70 else (
-                           "Oversold"   if technicals["rsi"] < 30 else "Neutral"),
-                           30 <= technicals["rsi"] <= 70)
-        render_metric_card("ADX (Trend)",    f"{technicals['adx']:.1f}",
-                           "Strong trend" if technicals["adx"] > 25 else "Weak/ranging",
-                           technicals["adx"] > 25)
-        render_metric_card("Volume Ratio",   f"{technicals['vol_ratio']:.2f}×",
-                           "Above avg" if technicals["vol_ratio"] > 1 else "Below avg",
-                           technicals["vol_ratio"] > 1)
-
-    # ── COLUMN 2 : Sector Pulse ───────────────────────────────────────────────
-    with col2:
-        st.markdown(f"""<div class="col-header col-header-sector">
-          <div style="font-size:11px;color:#58a6ff;text-transform:uppercase;letter-spacing:.06em;">Col 2</div>
-          <div style="font-size:15px;font-weight:600;color:#e6edf3;margin-top:2px;">📡 Sector Pulse</div>
-        </div>""", unsafe_allow_html=True)
-
-        st.plotly_chart(
-            chart_sector_comparison(symbol, price_df),
-            use_container_width=True,
-            config={"displayModeBar": False},
+        st.markdown(
+            '<div class="regime-normal">&#x2705; Normal Market Regime — India VIX at '
+            + str(round(vix, 1))
+            + '. Risk-on environment. Broad market participation expected.</div>',
+            unsafe_allow_html=True,
         )
 
-        # Price chart (90D)
-        st.plotly_chart(
-            chart_candlestick(price_df, symbol, technicals),
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
+    # ── TABS ──────────────────────────────────────────────────────────────────
+    tab_analysis, tab_mystocks, tab_crisis = st.tabs([
+        "📊 Stock Analysis",
+        "⭐ My Stocks",
+        "🌍 Global Crisis Monitor",
+    ])
 
-    # ── COLUMN 3 : Project Catalysts ─────────────────────────────────────────
-    with col3:
-        st.markdown(f"""<div class="col-header col-header-proj">
-          <div style="font-size:11px;color:#3fb950;text-transform:uppercase;letter-spacing:.06em;">Col 3</div>
-          <div style="font-size:15px;font-weight:600;color:#e6edf3;margin-top:2px;">🏗 Project Catalysts</div>
-        </div>""", unsafe_allow_html=True)
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 1 — STOCK ANALYSIS
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_analysis:
+        col_h1, col_h2 = st.columns([3, 1])
+        with col_h1:
+            st.markdown(
+                "## " + symbol +
+                " &nbsp;<span style=\'font-size:16px;color:#8b949e;font-weight:400;\'>NSE · "
+                + sector_name + "</span>",
+                unsafe_allow_html=True,
+            )
+        with col_h2:
+            st.caption("Updated: " + datetime.now().strftime("%d %b %Y, %H:%M IST"))
+            if st.button("+ Add to Watchlist", key="add_wl_analysis"):
+                if symbol not in st.session_state.watchlist:
+                    st.session_state.watchlist.append(symbol)
+                    st.success(symbol + " added to watchlist!")
+                else:
+                    st.info("Already in watchlist")
 
-        st.markdown("**AI-Researched Contract Wins**")
-        for proj in projects:
-            render_project_card(
-                proj.get("title", ""),
-                proj.get("content", ""),
-                proj.get("published_date", "Recent"),
-                proj.get("url", ""),
+        with st.spinner("Fetching market data..."):
+            price_df     = fetch_nse_price_history(symbol, years=5)
+            fundamentals = fetch_fundamentals_fmp(symbol, fmp_key)
+            news         = fetch_news_finnhub(symbol, finnhub_key)
+            projects     = fetch_deep_research_tavily(symbol, tavily_key)
+            sentiments   = score_sentiment_finbert([n["headline"] for n in news])
+            technicals   = compute_technicals(price_df)
+            master       = compute_master_score(technicals, fundamentals, sentiments, vix)
+
+        close         = price_df["CLOSE"]
+        current_price = close.iloc[-1]
+        prev_close    = close.iloc[-2]
+        day_chg       = (current_price / prev_close - 1) * 100
+        mtd_chg       = (current_price / close.tail(22).iloc[0] - 1) * 100
+        ytd_chg       = (current_price / close.tail(252).iloc[0] - 1) * 100
+
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        with m1: render_metric_card("LTP (Rs)", "Rs" + "{:,.1f}".format(current_price), "{:.2f}%".format(abs(day_chg)), day_chg >= 0)
+        with m2: render_metric_card("Day Change", "{:+.2f}%".format(day_chg), None, None)
+        with m3: render_metric_card("MTD Return", "{:+.1f}%".format(mtd_chg), None, None)
+        with m4: render_metric_card("YTD Return", "{:+.1f}%".format(ytd_chg), None, None)
+        with m5: render_metric_card("52W High", "Rs" + "{:,.0f}".format(technicals["week52_high"]), "{:.1f}% from high".format(technicals["pct_from_high"]), technicals["pct_from_high"] >= -5)
+        with m6: render_metric_card("5Y CAGR", str(technicals["cagr_5y"]) + "%", None, technicals["cagr_5y"] >= 10)
+
+        st.markdown("---")
+
+        has_key = bool(anthropic_key and anthropic_key.strip().startswith("sk-ant"))
+        with st.spinner("AI Agent analysing..." if has_key else "Generating verdict..."):
+            ai_verdict = call_ai_agent(symbol, sector_name, current_price, day_chg,
+                                       technicals, fundamentals, master, news,
+                                       sentiments, projects, vix, anthropic_key)
+        render_ai_verdict(ai_verdict, symbol, current_price, has_key)
+
+        st.markdown("---")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.markdown(
+                '<div class="col-header col-header-gov">'
+                '<div style="font-size:11px;color:#f78166;text-transform:uppercase;letter-spacing:.06em;">Col 1</div>'
+                '<div style="font-size:15px;font-weight:600;color:#e6edf3;margin-top:2px;">&#x1F3DB; Govt &amp; Macro</div>'
+                '</div>', unsafe_allow_html=True)
+            policies = SECTOR_POLICY_MAP.get(sector_name, SECTOR_POLICY_MAP.get("General", ["Check DPIIT portal"]))
+            st.markdown("**Active PLI / Policy Schemes**")
+            for policy in policies:
+                st.markdown('<div class="news-card" style="border-left:3px solid #f78166;"><div class="news-title">&#x1F4CC; ' + policy + '</div></div>', unsafe_allow_html=True)
+            st.markdown("**Macro Indicators**")
+            render_metric_card("India VIX", str(round(vix, 1)), None, None)
+            render_metric_card("Market Regime", "Defensive" if vix > 22 else "Normal", None, vix <= 22)
+            render_metric_card("RSI (14D)", str(technicals["rsi"]), "Overbought" if technicals["rsi"] > 70 else ("Oversold" if technicals["rsi"] < 30 else "Neutral"), 30 <= technicals["rsi"] <= 70)
+            render_metric_card("ADX (Trend)", str(technicals["adx"]), "Strong" if technicals["adx"] > 25 else "Weak", technicals["adx"] > 25)
+            render_metric_card("Volume Ratio", str(technicals["vol_ratio"]) + "x", "Above avg" if technicals["vol_ratio"] > 1 else "Below avg", technicals["vol_ratio"] > 1)
+
+        with col2:
+            st.markdown(
+                '<div class="col-header col-header-sector">'
+                '<div style="font-size:11px;color:#58a6ff;text-transform:uppercase;letter-spacing:.06em;">Col 2</div>'
+                '<div style="font-size:15px;font-weight:600;color:#e6edf3;margin-top:2px;">&#x1F4E1; Sector Pulse</div>'
+                '</div>', unsafe_allow_html=True)
+            st.plotly_chart(chart_sector_comparison(symbol, price_df), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(chart_candlestick(price_df, symbol, technicals), use_container_width=True, config={"displayModeBar": False})
+
+        with col3:
+            st.markdown(
+                '<div class="col-header col-header-proj">'
+                '<div style="font-size:11px;color:#3fb950;text-transform:uppercase;letter-spacing:.06em;">Col 3</div>'
+                '<div style="font-size:15px;font-weight:600;color:#e6edf3;margin-top:2px;">&#x1F3D7; Project Catalysts</div>'
+                '</div>', unsafe_allow_html=True)
+            st.markdown("**AI-Researched Contract Wins**")
+            for proj in projects:
+                render_project_card(proj.get("title",""), proj.get("content",""), proj.get("published_date","Recent"), proj.get("url",""))
+            st.markdown("**FinBERT News Sentiment**")
+            for news_item, sent in zip(news[:6], sentiments[:6]):
+                render_news_card(news_item.get("headline",""), news_item.get("source",""), news_item.get("datetime",0), sent.get("label","neutral"), news_item.get("url",""))
+
+        with col4:
+            st.markdown(
+                '<div class="col-header col-header-dive">'
+                '<div style="font-size:11px;color:#d2a8ff;text-transform:uppercase;letter-spacing:.06em;">Col 4</div>'
+                '<div style="font-size:15px;font-weight:600;color:#e6edf3;margin-top:2px;">&#x1F52C; 5-Year Deep Dive</div>'
+                '</div>', unsafe_allow_html=True)
+            render_master_score(master)
+            st.plotly_chart(chart_score_radar(master), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(chart_fundamentals(fundamentals), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(chart_price_cagr(price_df, symbol), use_container_width=True, config={"displayModeBar": False})
+            score_df = pd.DataFrame({
+                "Component": ["Technicals","Fundamentals","Sentiment","Total"],
+                "Score":     [master["tech_s"], master["fund_s"], master["sent_s"], master["score"]],
+                "Max":       [35, 35, 30, 100],
+                "Weight":    ["35%","35%","30%","100%"],
+            })
+            st.dataframe(score_df, use_container_width=True, hide_index=True)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 2 — MY STOCKS (WATCHLIST)
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_mystocks:
+        st.markdown("### ⭐ My Watchlist")
+
+        # ── Add stock ─────────────────────────────────────────────────────────
+        with st.expander("➕ Add Stock to Watchlist", expanded=len(st.session_state.watchlist) == 0):
+            a1, a2 = st.columns([4, 1])
+            with a1:
+                add_query = st.text_input("Search NSE/BSE symbol", placeholder="e.g. ZOMATO, IRFC, DMART", key="wl_add_search")
+                if add_query:
+                    suggestions = search_nse_stocks(add_query)
+                    if suggestions:
+                        chosen = st.selectbox("Select stock", suggestions, key="wl_chosen")
+                    else:
+                        chosen = add_query.upper().strip()
+            with a2:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                if st.button("Add ➕", key="wl_add_btn", type="primary"):
+                    sym_to_add = chosen if add_query else ""
+                    if sym_to_add and sym_to_add not in st.session_state.watchlist:
+                        st.session_state.watchlist.append(sym_to_add)
+                        st.success(sym_to_add + " added!")
+                        st.rerun()
+                    elif sym_to_add in st.session_state.watchlist:
+                        st.warning("Already in watchlist")
+
+        # ── Watchlist display ─────────────────────────────────────────────────
+        if not st.session_state.watchlist:
+            st.info("Your watchlist is empty. Add stocks using the form above.")
+        else:
+            st.markdown(
+                '<div style="font-size:11px;color:#8b949e;margin-bottom:12px;">'
+                + str(len(st.session_state.watchlist))
+                + ' stocks tracked · Click ✕ to remove · Click Analyse for full report</div>',
+                unsafe_allow_html=True,
             )
 
-        st.markdown("**FinBERT News Sentiment**")
-        for i, (news_item, sent) in enumerate(zip(news[:6], sentiments[:6])):
-            render_news_card(
-                news_item.get("headline", ""),
-                news_item.get("source", ""),
-                news_item.get("datetime", 0),
-                sent.get("label", "neutral"),
-                news_item.get("url", ""),
+            total_gain = 0
+            total_stocks = 0
+
+            for wl_sym in list(st.session_state.watchlist):
+                try:
+                    wl_df   = fetch_nse_price_history(wl_sym, years=1)
+                    wl_close= wl_df["CLOSE"]
+                    wl_price= round(wl_close.iloc[-1], 2)
+                    wl_prev = round(wl_close.iloc[-2], 2)
+                    wl_chg  = round((wl_price / wl_prev - 1) * 100, 2)
+                    wl_ytd  = round((wl_price / wl_close.iloc[0] - 1) * 100, 1)
+                    wl_tech = compute_technicals(wl_df)
+                    wl_fund = _synthetic_fundamentals(wl_sym)
+                    wl_master = compute_master_score(wl_tech, wl_fund, [{"label":"neutral","score":0.5}], vix)
+                    score   = wl_master["score"]
+                    verdict = wl_master["verdict"]
+                    v_color = wl_master["color"]
+                    chg_color = "#3fb950" if wl_chg >= 0 else "#f85149"
+                    chg_arrow = "&#9650;" if wl_chg >= 0 else "&#9660;"
+                    total_gain += wl_ytd
+                    total_stocks += 1
+                except Exception:
+                    wl_price, wl_chg, wl_ytd, score, verdict, v_color = 0, 0, 0, 50, "HOLD", "#e3b341"
+                    chg_color, chg_arrow = "#8b949e", ""
+
+                r1, r2, r3, r4, r5 = st.columns([2, 2, 2, 2, 1])
+                with r1:
+                    st.markdown(
+                        '<div style="padding:10px 0;">'
+                        '<div class="wl-symbol">' + wl_sym + '</div>'
+                        '<div class="wl-name">' + _get_sector(wl_sym) + '</div>'
+                        '</div>', unsafe_allow_html=True)
+                with r2:
+                    st.markdown(
+                        '<div style="padding:10px 0;">'
+                        '<div class="wl-price" style="color:' + chg_color + ';">&#8377;' + "{:,.2f}".format(wl_price) + '</div>'
+                        '<div class="wl-chg" style="color:' + chg_color + ';">' + chg_arrow + ' ' + "{:+.2f}%".format(wl_chg) + ' today</div>'
+                        '</div>', unsafe_allow_html=True)
+                with r3:
+                    ytd_color = "#3fb950" if wl_ytd >= 0 else "#f85149"
+                    st.markdown(
+                        '<div style="padding:10px 0;">'
+                        '<div style="font-size:11px;color:#8b949e;">YTD Return</div>'
+                        '<div style="font-size:16px;font-weight:700;color:' + ytd_color + ';">' + "{:+.1f}%".format(wl_ytd) + '</div>'
+                        '</div>', unsafe_allow_html=True)
+                with r4:
+                    st.markdown(
+                        '<div style="padding:10px 0;">'
+                        '<div style="font-size:11px;color:#8b949e;">AI Score · Verdict</div>'
+                        '<div style="font-size:15px;font-weight:700;color:' + v_color + ';">' + str(score) + '/100</div>'
+                        '<div style="font-size:11px;color:' + v_color + ';font-weight:600;">' + verdict + '</div>'
+                        '</div>', unsafe_allow_html=True)
+                with r5:
+                    c1b, c2b = st.columns(2)
+                    with c1b:
+                        if st.button("&#x1F4C8;", key="wl_view_" + wl_sym, help="Analyse " + wl_sym):
+                            st.session_state.selected_symbol = wl_sym
+                            st.info("Switch to Stock Analysis tab and search " + wl_sym)
+                    with c2b:
+                        if st.button("&#x2715;", key="wl_del_" + wl_sym, help="Remove " + wl_sym):
+                            st.session_state.watchlist.remove(wl_sym)
+                            st.rerun()
+                st.markdown('<hr style="border-color:#21262d;margin:0;">', unsafe_allow_html=True)
+
+            # ── Portfolio summary ─────────────────────────────────────────────
+            if total_stocks > 0:
+                avg_gain = round(total_gain / total_stocks, 1)
+                gain_color = "#3fb950" if avg_gain >= 0 else "#f85149"
+                st.markdown(
+                    '<div style="background:#161b22;border:1px solid #30363d;border-radius:10px;'
+                    'padding:16px 20px;margin-top:16px;display:flex;justify-content:space-between;">'
+                    '<div><div style="font-size:11px;color:#8b949e;">Stocks Tracked</div>'
+                    '<div style="font-size:22px;font-weight:700;color:#e6edf3;">' + str(total_stocks) + '</div></div>'
+                    '<div><div style="font-size:11px;color:#8b949e;">Avg YTD Return</div>'
+                    '<div style="font-size:22px;font-weight:700;color:' + gain_color + ';">'
+                    + "{:+.1f}%".format(avg_gain) + '</div></div>'
+                    '<div><div style="font-size:11px;color:#8b949e;">Market Regime</div>'
+                    '<div style="font-size:16px;font-weight:700;color:' + ("#f85149" if vix > 22 else "#3fb950") + ';">'
+                    + ("Defensive" if vix > 22 else "Normal") + '</div></div>'
+                    '</div>', unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 3 — GLOBAL CRISIS MONITOR
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_crisis:
+        st.markdown("### 🌍 Global Crisis Monitor")
+        st.markdown('<div style="font-size:13px;color:#8b949e;margin-bottom:16px;">Live global market stress indicators that affect NSE/BSE stocks. Updated every 5 minutes.</div>', unsafe_allow_html=True)
+
+        with st.spinner("Fetching global indicators..."):
+            indicators = fetch_global_indicators()
+
+        # ── Global Indicator Grid ─────────────────────────────────────────────
+        def _crisis_card(label, value_str, status, level, sub=""):
+            level_class = {"extreme":"crisis-extreme","high":"crisis-high","moderate":"crisis-moderate","low":"crisis-low"}.get(level,"crisis-moderate")
+            color = {"extreme":"#f85149","high":"#f0883e","moderate":"#e3b341","low":"#3fb950"}.get(level,"#e3b341")
+            return (
+                '<div class="crisis-card ' + level_class + '">'
+                '<div class="crisis-label">' + label + '</div>'
+                '<div class="crisis-value" style="color:' + color + ';">' + value_str + '</div>'
+                '<div class="crisis-status" style="color:' + color + ';">' + status + '</div>'
+                + ('<div style="font-size:10px;color:#8b949e;margin-top:3px;">' + sub + '</div>' if sub else "")
+                + '</div>'
             )
 
-    # ── COLUMN 4 : 5-Year Deep Dive ──────────────────────────────────────────
-    with col4:
-        st.markdown(f"""<div class="col-header col-header-dive">
-          <div style="font-size:11px;color:#d2a8ff;text-transform:uppercase;letter-spacing:.06em;">Col 4</div>
-          <div style="font-size:15px;font-weight:600;color:#e6edf3;margin-top:2px;">🔬 5-Year Deep Dive</div>
-        </div>""", unsafe_allow_html=True)
+        fg = indicators.get("fear_greed", {})
+        fg_val = fg.get("value", 50)
+        fg_lbl = fg.get("label", "Neutral")
+        fg_level = "extreme" if fg_val < 20 else "high" if fg_val < 35 else "moderate" if fg_val < 55 else "low"
 
-        render_master_score(master)
+        vix_val = indicators.get("india_vix", {}).get("price", 15)
+        vix_level = "extreme" if vix_val > 30 else "high" if vix_val > 22 else "moderate" if vix_val > 17 else "low"
 
-        st.plotly_chart(
-            chart_score_radar(master),
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
+        gold = indicators.get("gold", {})
+        gold_chg = gold.get("chg", 0)
+        gold_level = "extreme" if gold_chg > 2 else "high" if gold_chg > 0.5 else "low"
 
-        st.plotly_chart(
-            chart_fundamentals(fundamentals),
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
+        oil = indicators.get("oil", {})
+        oil_chg = oil.get("chg", 0)
+        oil_level = "extreme" if abs(oil_chg) > 3 else "high" if abs(oil_chg) > 1.5 else "low"
 
-        st.plotly_chart(
-            chart_price_cagr(price_df, symbol),
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
+        usdinr = indicators.get("usdinr", {})
+        usdinr_price = usdinr.get("price", 83)
+        usdinr_chg   = usdinr.get("chg", 0)
+        usdinr_level = "high" if usdinr_chg > 0.5 else "moderate" if usdinr_chg > 0.2 else "low"
 
-        # Summary table
-        st.markdown("**Score Breakdown**")
-        score_df = pd.DataFrame({
-            "Component":    ["Technicals", "Fundamentals", "Sentiment", "Total"],
-            "Score":        [master["tech_s"], master["fund_s"], master["sent_s"], master["score"]],
-            "Max":          [35, 35, 30, 100],
-            "Weight":       ["35%", "35%", "30%", "100%"],
-        })
-        st.dataframe(score_df, use_container_width=True, hide_index=True)
+        us10y = indicators.get("us10y", {})
+        us10y_price = us10y.get("price", 4.3)
+        us10y_level = "high" if us10y_price > 5 else "moderate" if us10y_price > 4.5 else "low"
+
+        g1, g2, g3, g4, g5, g6 = st.columns(6)
+        with g1:
+            st.markdown(_crisis_card("Fear & Greed", str(fg_val), fg_lbl, fg_level, "0=Extreme Fear, 100=Greed"), unsafe_allow_html=True)
+        with g2:
+            st.markdown(_crisis_card("India VIX", str(round(vix_val,1)), "Defensive Mode" if vix_val>22 else "Normal", vix_level, ">22 triggers Defensive"), unsafe_allow_html=True)
+        with g3:
+            gold_str = "$" + "{:,.0f}".format(gold.get("price",0)) if gold.get("price") else "N/A"
+            st.markdown(_crisis_card("Gold ($/oz)", gold_str, ("+" if gold_chg>=0 else "")+"{:.2f}%".format(gold_chg)+" today", gold_level, "Safe haven demand"), unsafe_allow_html=True)
+        with g4:
+            oil_str = "$" + "{:.1f}".format(oil.get("price",0)) if oil.get("price") else "N/A"
+            st.markdown(_crisis_card("Crude Oil (WTI)", oil_str, ("+" if oil_chg>=0 else "")+"{:.2f}%".format(oil_chg)+" today", oil_level, "High oil = cost pressure"), unsafe_allow_html=True)
+        with g5:
+            st.markdown(_crisis_card("USD/INR", str(round(usdinr_price,2)), ("+" if usdinr_chg>=0 else "")+"{:.2f}%".format(usdinr_chg)+" today", usdinr_level, "Rising = IT stocks benefit"), unsafe_allow_html=True)
+        with g6:
+            st.markdown(_crisis_card("US 10Y Yield", str(round(us10y_price,2))+"%", "High" if us10y_price>4.5 else "Moderate", us10y_level, "High = FII outflows risk"), unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Impact Analysis ───────────────────────────────────────────────────
+        st.markdown("### 🎯 How Global Crisis Affects Your Stocks")
+        impact_col, opp_col = st.columns([1, 1])
+
+        with impact_col:
+            st.markdown("**🔴 Crisis Impact on Indian Markets**")
+            impacts = [
+                ("High US Yields (>4.5%)", "FII outflows from emerging markets → Nifty pressure", us10y_level in ["high","extreme"]),
+                ("USD/INR Depreciation",   "Import costs rise → Margins hurt for manufacturers",  usdinr_chg > 0.3),
+                ("Oil Price Surge (>$90)", "Input cost inflation → FMCG, Auto, Airlines suffer",  oil.get("price",70) > 90),
+                ("Extreme Fear (F&G<25)",  "Panic selling → Blue-chips oversold → Buying opp",    fg_val < 25),
+                ("India VIX > 22",         "High volatility → Reduce position sizing by 30%",     vix_val > 22),
+                ("Gold Rally",             "Risk-off signal → Rotate to defensives & gold ETFs",  gold_chg > 1.5),
+            ]
+            for label, desc, is_active in impacts:
+                border = "#f85149" if is_active else "#30363d"
+                icon   = "&#x1F534;" if is_active else "&#x26AA;"
+                st.markdown(
+                    '<div style="background:#161b22;border:1px solid ' + border + ';border-radius:8px;'
+                    'padding:10px 14px;margin:6px 0;">'
+                    '<div style="font-size:12px;font-weight:600;color:#e6edf3;">' + icon + ' ' + label + '</div>'
+                    '<div style="font-size:11px;color:#8b949e;margin-top:3px;">' + desc + '</div>'
+                    '</div>', unsafe_allow_html=True)
+
+        with opp_col:
+            st.markdown("**🟢 Crisis Opportunity Stocks (3-6 Month Outlook)**")
+            opp_stocks = get_crisis_opportunity_stocks(indicators)
+            for opp in opp_stocks:
+                v_color = "#3fb950" if opp["verdict"] in ["STRONG BUY","BUY"] else "#e3b341"
+                type_badge = {"defensive":"&#x1F6E1; Defensive","currency":"&#x1F4B5; USD Hedge","infra":"&#x1F3D7; Infra","commodity":"&#x26CF; Commodity"}.get(opp["crisis_type"],"")
+                st.markdown(
+                    '<div class="opp-card ' + ("" if opp["score"]>=30 else "caution") + '">'
+                    '<div style="display:flex;justify-content:space-between;align-items:center;">'
+                    '<div class="opp-symbol">' + opp["symbol"] + ' <span style="font-size:10px;color:#58a6ff;">' + type_badge + '</span></div>'
+                    '<div class="opp-verdict" style="color:' + v_color + ';">' + opp["verdict"] + '</div>'
+                    '</div>'
+                    '<div class="opp-reason">' + opp["reason"] + '</div>'
+                    '<div style="font-size:10px;color:#8b949e;margin-top:4px;">Crisis Score: ' + str(opp["score"]) + '/70</div>'
+                    '</div>', unsafe_allow_html=True)
+
+        # ── Global Market Heatmap ─────────────────────────────────────────────
+        st.markdown("<br>**📡 Global Index Pulse**")
+        g_indices = [
+            ("FTSE 100",  indicators.get("ftse",   {}).get("price", 0), indicators.get("ftse",   {}).get("chg", 0)),
+            ("Nikkei 225",indicators.get("nikkei", {}).get("price", 0), indicators.get("nikkei", {}).get("chg", 0)),
+        ]
+        idx_cols = st.columns(max(len(g_indices), 1))
+        for i, (name, price, chg) in enumerate(g_indices):
+            with idx_cols[i]:
+                chg_color = "#3fb950" if chg >= 0 else "#f85149"
+                st.markdown(
+                    '<div class="crisis-card" style="text-align:center;">'
+                    '<div class="crisis-label">' + name + '</div>'
+                    '<div class="crisis-value" style="color:#e6edf3;">' + ("{:,.0f}".format(price) if price else "N/A") + '</div>'
+                    '<div style="font-size:12px;color:' + chg_color + ';font-weight:600;">'
+                    + ("+" if chg>=0 else "") + "{:.2f}%".format(chg) + '</div>'
+                    '</div>', unsafe_allow_html=True)
 
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown("---")
-    st.markdown("""
-    <div style="text-align:center; color:#8b949e; font-size:11px; padding: 8px 0;">
-      🇮🇳 India Market Intelligence Dashboard &nbsp;·&nbsp;
-      Data: NSE via jugaad-data/nselib · FMP · Finnhub · Tavily AI &nbsp;·&nbsp;
-      Sentiment: FinBERT (ProsusAI) &nbsp;·&nbsp;
-      <strong style="color:#f85149;">Not investment advice.</strong>
-      For institutional research use only.
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        '<div style="text-align:center;color:#8b949e;font-size:11px;padding:8px 0;">'
+        '&#x1F1EE;&#x1F1F3; India Market Intelligence &nbsp;&middot;&nbsp; '
+        'NSE/BSE &middot; FMP &middot; Finnhub &middot; Tavily AI &middot; FinBERT &nbsp;&middot;&nbsp; '
+        '<strong style="color:#f85149;">Not investment advice.</strong>'
+        '</div>', unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
