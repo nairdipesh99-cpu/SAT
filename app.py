@@ -1281,26 +1281,43 @@ def chart_fundamentals(fundamentals: Dict) -> go.Figure:
     fig = make_subplots(
         rows=1, cols=3,
         subplot_titles=("Debt / Equity", "ROE (%)", "Net Profit Margin (%)"),
+        horizontal_spacing=0.12,   # breathing room between subplots
     )
     fig.add_trace(go.Bar(
         x=years, y=fundamentals["de"],
         name="D/E", marker_color="#f0883e",
+        text=[str(v) for v in fundamentals["de"]],
+        textposition="outside",
+        textfont=dict(size=9, color="#8b949e"),
     ), row=1, col=1)
     fig.add_trace(go.Scatter(
         x=years, y=fundamentals["roe"],
         name="ROE", mode="lines+markers",
         line=dict(color="#58a6ff", width=2),
-        marker=dict(size=7),
+        marker=dict(size=6),
     ), row=1, col=2)
     fig.add_trace(go.Bar(
         x=years, y=fundamentals["npm"],
         name="NPM", marker_color="#3fb950",
+        text=[str(v) for v in fundamentals["npm"]],
+        textposition="outside",
+        textfont=dict(size=9, color="#8b949e"),
     ), row=1, col=3)
 
+    # Style subplot title annotations so they sit above charts cleanly
+    for ann in fig.layout.annotations:
+        ann.font = dict(size=11, color="#8b949e")
+        ann.y   += 0.05   # push titles up slightly
+
+    fig.update_xaxes(tickfont=dict(size=9, color="#8b949e"))
+    fig.update_yaxes(tickfont=dict(size=9, color="#8b949e"), showgrid=True,
+                     gridcolor="#21262d", zeroline=False)
+
     fig.update_layout(
-        title=dict(text="5-Year Fundamental Trend", font=dict(size=13, color="#e6edf3")),
         showlegend=False,
-        height=260,
+        height=300,
+        # top margin big enough for subplot titles + avoid clipping
+        margin=dict(l=40, r=20, t=50, b=40),
         **PLOTLY_DARK,
     )
     return fig
@@ -1308,7 +1325,7 @@ def chart_fundamentals(fundamentals: Dict) -> go.Figure:
 
 def chart_sector_comparison(symbol: str, stock_df_data: pd.DataFrame) -> go.Figure:
     sector_df = fetch_sector_index(symbol)
-    sector_name, _ = NSE_SECTOR_MAP.get(symbol, ("Nifty 500", "_"))
+    sector_name = NSE_SECTOR_MAP.get(symbol, (_get_sector(symbol), "_"))[0]
 
     common = stock_df_data.index.intersection(sector_df.index)
     if len(common) < 10:
@@ -1339,24 +1356,39 @@ def chart_sector_comparison(symbol: str, stock_df_data: pd.DataFrame) -> go.Figu
 
 def chart_score_radar(master: Dict) -> go.Figure:
     categories = ["Technical", "Fundamental", "Sentiment", "Technical"]
-    values = [master["tech_s"] / 35 * 100, master["fund_s"] / 35 * 100,
-              master["sent_s"] / 30 * 100, master["tech_s"] / 35 * 100]
-
+    values = [
+        round(master["tech_s"] / 35 * 100, 1),
+        round(master["fund_s"] / 35 * 100, 1),
+        round(master["sent_s"] / 30 * 100, 1),
+        round(master["tech_s"] / 35 * 100, 1),
+    ]
     fig = go.Figure(go.Scatterpolar(
         r=values, theta=categories,
         fill="toself",
-        fillcolor=f"rgba({_hex_to_rgb(master['color'])},0.2)",
-        line=dict(color=master["color"], width=2),
+        fillcolor="rgba({},0.18)".format(_hex_to_rgb(master["color"])),
+        line=dict(color=master["color"], width=2.5),
         name="Score",
     ))
     fig.update_layout(
         polar=dict(
             bgcolor="#161b22",
-            radialaxis=dict(visible=True, range=[0, 100],
-                            gridcolor="#30363d", tickfont=dict(size=9, color="#8b949e")),
-            angularaxis=dict(gridcolor="#30363d", tickfont=dict(size=11, color="#e6edf3")),
+            radialaxis=dict(
+                visible=True, range=[0, 100],
+                gridcolor="#30363d",
+                tickvals=[25, 50, 75, 100],
+                tickfont=dict(size=8, color="#8b949e"),
+                showticklabels=True,
+            ),
+            angularaxis=dict(
+                gridcolor="#30363d",
+                tickfont=dict(size=12, color="#e6edf3"),
+            ),
+            # shrink inner plot so labels don't get clipped
+            domain=dict(x=[0.05, 0.95], y=[0.05, 0.95]),
         ),
-        height=220, showlegend=False,
+        height=260,
+        showlegend=False,
+        margin=dict(l=55, r=55, t=20, b=55),  # generous margin for axis labels
         **PLOTLY_DARK,
     )
     return fig
@@ -1364,34 +1396,58 @@ def chart_score_radar(master: Dict) -> go.Figure:
 
 def chart_price_cagr(df: pd.DataFrame, symbol: str) -> go.Figure:
     yearly = df["CLOSE"].resample("YE").last()
-    cagr_vals, years_list = [], []
+
+    # Convert datetime index → clean year strings (avoids "23:59", "00:00:00" on x-axis)
+    yearly_years  = [str(d.year) for d in yearly.index]
+    yearly_prices = list(yearly.values)
+
+    cagr_vals, cagr_years = [], []
     if len(yearly) >= 2:
         base = yearly.iloc[0]
         for i, (yr, val) in enumerate(yearly.items(), 1):
-            if i > 0:
-                c = ((val / base) ** (1 / i) - 1) * 100
-                years_list.append(yr.year)
-                cagr_vals.append(round(c, 1))
+            c = ((val / base) ** (1 / i) - 1) * 100
+            cagr_years.append(str(yr.year))
+            cagr_vals.append(round(c, 1))
 
-    fig = make_subplots(rows=1, cols=2, subplot_titles=("Annual Close Price", "Rolling CAGR (%)"))
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=("Annual Close (&#8377;)", "Rolling CAGR (%)"),
+        horizontal_spacing=0.14,
+    )
+
     fig.add_trace(go.Scatter(
-        x=yearly.index, y=yearly.values,
+        x=yearly_years, y=yearly_prices,
         mode="lines+markers",
         line=dict(color="#58a6ff", width=2),
+        marker=dict(size=6, color="#58a6ff"),
         fill="tozeroy", fillcolor="rgba(88,166,255,0.1)",
         name="Annual Close",
     ), row=1, col=1)
 
     if cagr_vals:
-        colors = ["#3fb950" if v >= 0 else "#f85149" for v in cagr_vals]
+        bar_colors = ["#3fb950" if v >= 0 else "#f85149" for v in cagr_vals]
         fig.add_trace(go.Bar(
-            x=years_list, y=cagr_vals,
-            marker_color=colors, name="CAGR",
+            x=cagr_years, y=cagr_vals,
+            marker_color=bar_colors,
+            text=[str(v)+"%" for v in cagr_vals],
+            textposition="outside",
+            textfont=dict(size=9, color="#8b949e"),
+            name="CAGR",
         ), row=1, col=2)
 
+    # Push subplot titles up and reduce font so they don't sit on the chart
+    for ann in fig.layout.annotations:
+        ann.font = dict(size=11, color="#8b949e")
+        ann.y   += 0.05
+
+    fig.update_xaxes(tickfont=dict(size=10, color="#8b949e"), tickangle=0)
+    fig.update_yaxes(tickfont=dict(size=9,  color="#8b949e"),
+                     gridcolor="#21262d", zeroline=False)
+
     fig.update_layout(
-        title=dict(text=f"{symbol} — 5-Year Price CAGR Analysis", font=dict(size=13, color="#e6edf3")),
-        showlegend=False, height=270,
+        showlegend=False,
+        height=300,
+        margin=dict(l=40, r=20, t=50, b=40),
         **PLOTLY_DARK,
     )
     return fig
