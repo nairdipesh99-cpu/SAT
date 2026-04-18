@@ -2129,66 +2129,127 @@ def main():
             total_gain = 0
             total_stocks = 0
 
+            # Track which stock is being analysed inline
+            if "wl_analysing" not in st.session_state:
+                st.session_state.wl_analysing = None
+
             for wl_sym in list(st.session_state.watchlist):
                 try:
-                    wl_df   = fetch_nse_price_history(wl_sym, years=1)
-                    wl_close= wl_df["CLOSE"]
-                    wl_price= round(wl_close.iloc[-1], 2)
-                    wl_prev = round(wl_close.iloc[-2], 2)
-                    wl_chg  = round((wl_price / wl_prev - 1) * 100, 2)
-                    wl_ytd  = round((wl_price / wl_close.iloc[0] - 1) * 100, 1)
-                    wl_tech = compute_technicals(wl_df)
-                    wl_fund = _synthetic_fundamentals(wl_sym)
-                    wl_master = compute_master_score(wl_tech, wl_fund, [{"label":"neutral","score":0.5}], vix)
-                    score   = wl_master["score"]
-                    verdict = wl_master["verdict"]
-                    v_color = wl_master["color"]
-                    chg_color = "#3fb950" if wl_chg >= 0 else "#f85149"
-                    chg_arrow = "&#9650;" if wl_chg >= 0 else "&#9660;"
-                    total_gain += wl_ytd
+                    wl_df    = fetch_nse_price_history(wl_sym, years=1)
+                    wl_close = wl_df["CLOSE"]
+                    wl_price = round(float(wl_close.iloc[-1]), 2)
+                    wl_prev  = round(float(wl_close.iloc[-2]), 2)
+                    wl_chg   = round((wl_price / wl_prev - 1) * 100, 2)
+                    wl_ytd   = round((wl_price / float(wl_close.iloc[0]) - 1) * 100, 1)
+                    wl_tech  = compute_technicals(wl_df)
+                    wl_fund  = _synthetic_fundamentals(wl_sym)
+                    wl_master= compute_master_score(wl_tech, wl_fund, [{"label":"neutral","score":0.5}], vix)
+                    score    = wl_master["score"]
+                    verdict  = wl_master["verdict"]
+                    v_color  = wl_master["color"]
+                    chg_color= "#3fb950" if wl_chg >= 0 else "#f85149"
+                    chg_arrow= "▲" if wl_chg >= 0 else "▼"
+                    total_gain   += wl_ytd
                     total_stocks += 1
                 except Exception:
-                    wl_price, wl_chg, wl_ytd, score, verdict, v_color = 0, 0, 0, 50, "HOLD", "#e3b341"
-                    chg_color, chg_arrow = "#8b949e", ""
+                    wl_price = wl_chg = wl_ytd = 0.0
+                    score = 50; verdict = "HOLD"; v_color = "#e3b341"
+                    chg_color = "#8b949e"; chg_arrow = ""
+                    wl_tech = {}; wl_fund = _synthetic_fundamentals(wl_sym)
+                    wl_master = {"score":50,"verdict":"HOLD","color":"#e3b341","tech_s":17,"fund_s":17,"sent_s":16,"horizon":"N/A"}
 
-                r1, r2, r3, r4, r5 = st.columns([2, 2, 2, 2, 1])
-                with r1:
+                is_selected = st.session_state.wl_analysing == wl_sym
+                border_col  = "#3b82f6" if is_selected else "#30363d"
+
+                c_sym, c_price, c_ytd, c_score, c_btn1, c_btn2 = st.columns([2, 2, 1, 2, 1, 1])
+                with c_sym:
                     st.markdown(
-                        '<div style="padding:10px 0;">'
-                        '<div class="wl-symbol">' + wl_sym + '</div>'
-                        '<div class="wl-name">' + _get_sector(wl_sym) + '</div>'
-                        '</div>', unsafe_allow_html=True)
-                with r2:
+                        "<div style='padding:8px 0;'>"
+                        "<div style='font-size:15px;font-weight:700;color:#e6edf3;border-left:3px solid "
+                        + border_col + ";padding-left:8px;'>" + wl_sym + "</div>"
+                        "<div style='font-size:11px;color:#8b949e;padding-left:11px;'>"
+                        + _get_sector(wl_sym) + "</div></div>", unsafe_allow_html=True)
+                with c_price:
                     st.markdown(
-                        '<div style="padding:10px 0;">'
-                        '<div class="wl-price" style="color:' + chg_color + ';">&#8377;' + "{:,.2f}".format(wl_price) + '</div>'
-                        '<div class="wl-chg" style="color:' + chg_color + ';">' + chg_arrow + ' ' + "{:+.2f}%".format(wl_chg) + ' today</div>'
-                        '</div>', unsafe_allow_html=True)
-                with r3:
+                        "<div style='padding:8px 0;'>"
+                        "<div style='font-size:16px;font-weight:700;color:" + chg_color + ";'>&#8377;"
+                        + "{:,.2f}".format(wl_price) + "</div>"
+                        "<div style='font-size:12px;font-weight:600;color:" + chg_color + ";'>"
+                        + chg_arrow + " " + "{:+.2f}%".format(wl_chg) + " today</div></div>",
+                        unsafe_allow_html=True)
+                with c_ytd:
                     ytd_color = "#3fb950" if wl_ytd >= 0 else "#f85149"
                     st.markdown(
-                        '<div style="padding:10px 0;">'
-                        '<div style="font-size:11px;color:#8b949e;">YTD Return</div>'
-                        '<div style="font-size:16px;font-weight:700;color:' + ytd_color + ';">' + "{:+.1f}%".format(wl_ytd) + '</div>'
-                        '</div>', unsafe_allow_html=True)
-                with r4:
+                        "<div style='padding:8px 0;'>"
+                        "<div style='font-size:10px;color:#8b949e;'>YTD</div>"
+                        "<div style='font-size:15px;font-weight:700;color:" + ytd_color + ";'>"
+                        + "{:+.1f}%".format(wl_ytd) + "</div></div>", unsafe_allow_html=True)
+                with c_score:
                     st.markdown(
-                        '<div style="padding:10px 0;">'
-                        '<div style="font-size:11px;color:#8b949e;">AI Score · Verdict</div>'
-                        '<div style="font-size:15px;font-weight:700;color:' + v_color + ';">' + str(score) + '/100</div>'
-                        '<div style="font-size:11px;color:' + v_color + ';font-weight:600;">' + verdict + '</div>'
-                        '</div>', unsafe_allow_html=True)
-                with r5:
-                    c1b, c2b = st.columns(2)
-                    with c1b:
-                        if st.button("&#x1F4C8;", key="wl_view_" + wl_sym, help="Analyse " + wl_sym):
-                            st.session_state.selected_symbol = wl_sym
-                            st.info("Switch to Stock Analysis tab and search " + wl_sym)
-                    with c2b:
-                        if st.button("&#x2715;", key="wl_del_" + wl_sym, help="Remove " + wl_sym):
-                            st.session_state.watchlist.remove(wl_sym)
-                            st.rerun()
-                st.markdown('<hr style="border-color:#21262d;margin:0;">', unsafe_allow_html=True)
+                        "<div style='padding:8px 0;'>"
+                        "<div style='font-size:10px;color:#8b949e;'>AI Score / Verdict</div>"
+                        "<div style='font-size:16px;font-weight:700;color:" + v_color + ";'>"
+                        + str(score) + "/100</div>"
+                        "<div style='font-size:11px;font-weight:600;color:" + v_color + ";'>"
+                        + verdict + "</div></div>", unsafe_allow_html=True)
+                with c_btn1:
+                    btn_label = "▲ Hide" if is_selected else "📊 Analyse"
+                    if st.button(btn_label, key="wl_view_" + wl_sym, use_container_width=True, type="primary" if is_selected else "secondary"):
+                        st.session_state.wl_analysing = None if is_selected else wl_sym
+                        st.rerun()
+                with c_btn2:
+                    if st.button("✕", key="wl_del_" + wl_sym, use_container_width=True, help="Remove from watchlist"):
+                        st.session_state.watchlist.remove(wl_sym)
+                        if st.session_state.get("wl_analysing") == wl_sym:
+                            st.session_state.wl_analysing = None
+                        st.rerun()
+
+                # ── Inline full analysis panel ────────────────────────────────
+                if is_selected:
+                    with st.expander("", expanded=True):
+                        st.markdown("#### 📊 Full Analysis — " + wl_sym)
+                        with st.spinner("Loading full analysis for " + wl_sym + "..."):
+                            try:
+                                an_df    = fetch_nse_price_history(wl_sym, years=5)
+                                an_fund  = fetch_fundamentals_fmp(wl_sym, fmp_key)
+                                an_news  = fetch_news_finnhub(wl_sym, finnhub_key)
+                                an_proj  = fetch_deep_research_tavily(wl_sym, tavily_key)
+                                an_sents = score_sentiment_finbert([n["headline"] for n in an_news])
+                                an_tech  = compute_technicals(an_df)
+                                an_master= compute_master_score(an_tech, an_fund, an_sents, vix)
+                                an_price = float(an_df["CLOSE"].iloc[-1])
+                                an_chg   = float((an_df["CLOSE"].iloc[-1] / an_df["CLOSE"].iloc[-2] - 1) * 100)
+                                an_sector= _get_sector(wl_sym)
+
+                                a1, a2, a3, a4 = st.columns(4)
+                                with a1: render_metric_card("LTP", "Rs " + "{:,.2f}".format(an_price), "{:.2f}%".format(abs(an_chg)), an_chg >= 0)
+                                with a2: render_metric_card("RSI (14D)", str(an_tech.get("rsi", "N/A")), "Neutral" if 30 < an_tech.get("rsi",50) < 70 else "Extreme", 30 < an_tech.get("rsi",50) < 70)
+                                with a3: render_metric_card("5Y CAGR", str(an_tech.get("cagr_5y","N/A")) + "%", None, (an_tech.get("cagr_5y",0) or 0) >= 10)
+                                with a4: render_metric_card("Master Score", str(an_master["score"]) + "/100", an_master["verdict"], an_master["score"] >= 55)
+
+                                has_key = bool(anthropic_key and anthropic_key.strip().startswith("sk-ant"))
+                                with st.spinner("AI Agent analysing " + wl_sym + "..."):
+                                    an_verdict = call_ai_agent(
+                                        wl_sym, an_sector, an_price, an_chg,
+                                        an_tech, an_fund, an_master,
+                                        an_news, an_sents, an_proj, vix, anthropic_key,
+                                    )
+                                render_ai_verdict(an_verdict, wl_sym, an_price, has_key)
+
+                                ch1, ch2 = st.columns(2)
+                                with ch1:
+                                    st.plotly_chart(chart_candlestick(an_df, wl_sym, an_tech), use_container_width=True, config={"displayModeBar": False})
+                                with ch2:
+                                    st.plotly_chart(chart_fundamentals(an_fund), use_container_width=True, config={"displayModeBar": False})
+
+                                st.markdown("**Latest News**")
+                                for ni, si in zip(an_news[:4], an_sents[:4]):
+                                    render_news_card(ni.get("headline",""), ni.get("source",""), ni.get("datetime",0), si.get("label","neutral"), ni.get("url",""))
+
+                            except Exception as ex:
+                                st.error("Could not load analysis for " + wl_sym + ". Please try again. (" + str(ex)[:80] + ")")
+
+                st.markdown('<hr style="border-color:#21262d;margin:4px 0;">', unsafe_allow_html=True)
 
             # ── Portfolio summary ─────────────────────────────────────────────
             if total_stocks > 0:
