@@ -35,33 +35,87 @@ st.markdown("""
   /* ── Core dark background ── */
   .stApp { background: #0d1117; color: #e6edf3; }
 
-  /* ── Sidebar — always visible, never hidden ── */
+  /* ══ SIDEBAR — HIGH CONTRAST, ALWAYS VISIBLE ══ */
+  [data-testid="stSidebar"],
   section[data-testid="stSidebar"] {
-    display: block !important;
-    visibility: visible !important;
-    background: #161b22 !important;
-    border-right: 1px solid #30363d !important;
-    min-width: 240px;
-  }
-  section[data-testid="stSidebar"] > div {
-    display: block !important;
-    visibility: visible !important;
-  }
-
-  /* ── Sidebar collapse/expand arrow button ── */
-  button[kind="header"],
-  button[data-testid="collapsedControl"],
-  button[data-testid="baseButton-header"] {
-    display: block !important;
-    visibility: visible !important;
-    color: #58a6ff !important;
-    background: #161b22 !important;
+    display:    block      !important;
+    visibility: visible    !important;
+    opacity:    1          !important;
+    background: #1a2233    !important;   /* noticeably different from main bg */
+    border-right: 2px solid #3b82f6 !important;  /* bright blue border = unmissable */
+    min-width:  260px !important;
+    max-width:  320px !important;
+    transform:  none  !important;
   }
 
-  /* ── Hide only the Streamlit deploy/share menu — NOT the sidebar toggle ── */
+  /* Sidebar inner wrapper */
+  [data-testid="stSidebar"] > div:first-child,
+  [data-testid="stSidebarContent"] {
+    display:    block   !important;
+    visibility: visible !important;
+    opacity:    1       !important;
+    background: #1a2233 !important;
+    padding-top: 1rem;
+  }
+
+  /* ── Sidebar toggle / collapse button — bright & always visible ── */
+  [data-testid="stSidebarCollapseButton"],
+  [data-testid="collapsedControl"],
+  button[aria-label="Close sidebar"],
+  button[aria-label="Open sidebar"],
+  button[aria-label="Collapse sidebar"],
+  button[aria-label="Expand sidebar"] {
+    display:    block   !important;
+    visibility: visible !important;
+    opacity:    1       !important;
+    background: #3b82f6 !important;
+    color:      #ffffff !important;
+    border-radius: 0 8px 8px 0 !important;
+    border: none !important;
+    width:  28px !important;
+    height: 28px !important;
+  }
+
+  /* ── Sidebar text elements ── */
+  [data-testid="stSidebar"] label,
+  [data-testid="stSidebar"] .stMarkdown p,
+  [data-testid="stSidebar"] .stCaption {
+    color: #c9d1d9 !important;
+  }
+  [data-testid="stSidebar"] h1,
+  [data-testid="stSidebar"] h2,
+  [data-testid="stSidebar"] h3,
+  [data-testid="stSidebar"] strong {
+    color: #e6edf3 !important;
+  }
+
+  /* ── Sidebar inputs ── */
+  [data-testid="stSidebar"] input,
+  [data-testid="stSidebar"] select,
+  [data-testid="stSidebar"] textarea {
+    background: #0d1117 !important;
+    border: 1px solid #3b82f6 !important;
+    color: #e6edf3 !important;
+    border-radius: 6px !important;
+  }
+
+  /* ── Sidebar selectbox ── */
+  [data-testid="stSidebar"] [data-baseweb="select"] > div {
+    background: #0d1117 !important;
+    border: 1px solid #3b82f6 !important;
+    color: #e6edf3 !important;
+  }
+
+  /* ── Hide Streamlit deploy/share chrome (but NOT sidebar) ── */
   #MainMenu { visibility: hidden; }
-  footer { visibility: hidden; }
-  header { visibility: hidden; }
+  footer     { visibility: hidden; }
+  header     { visibility: hidden; }
+
+  /* ── Main content area — leave room for sidebar ── */
+  .main .block-container {
+    padding-left:  1.5rem !important;
+    padding-right: 1.5rem !important;
+  }
 
   /* ── Typography ── */
   h1, h2, h3, h4 { color: #e6edf3 !important; font-family: 'Inter', sans-serif; }
@@ -226,15 +280,22 @@ st.markdown("""
   .stDataFrame { background: #161b22 !important; }
   .stDataFrame th { background: #1c2128 !important; color: #8b949e !important; }
 
-  /* ── Sidebar ── */
+  /* ── Sidebar internal cards ── */
   .sidebar-section {
-    background: #1c2128;
+    background: #0d1117;
     border-radius: 8px;
-    padding: 12px;
+    padding: 12px 14px;
     margin: 8px 0;
-    border: 1px solid #30363d;
+    border: 1px solid #3b82f6;
   }
-  .sidebar-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .sidebar-label {
+    font-size: 11px;
+    color: #93c5fd;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
 
   /* ── Spinner ── */
   .stSpinner > div { border-top-color: #58a6ff !important; }
