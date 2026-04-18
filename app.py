@@ -34,10 +34,34 @@ st.markdown("""
 <style>
   /* ── Core dark background ── */
   .stApp { background: #0d1117; color: #e6edf3; }
-  section[data-testid="stSidebar"] { background: #161b22 !important; border-right: 1px solid #30363d; }
-  /* hide only deploy/share buttons, keep sidebar toggle visible */
-  div[data-testid="stToolbar"] button:not([data-testid="collapsedControl"]) { display: none; }
-  button[data-testid="collapsedControl"] { color: #58a6ff !important; }
+
+  /* ── Sidebar — always visible, never hidden ── */
+  section[data-testid="stSidebar"] {
+    display: block !important;
+    visibility: visible !important;
+    background: #161b22 !important;
+    border-right: 1px solid #30363d !important;
+    min-width: 240px;
+  }
+  section[data-testid="stSidebar"] > div {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  /* ── Sidebar collapse/expand arrow button ── */
+  button[kind="header"],
+  button[data-testid="collapsedControl"],
+  button[data-testid="baseButton-header"] {
+    display: block !important;
+    visibility: visible !important;
+    color: #58a6ff !important;
+    background: #161b22 !important;
+  }
+
+  /* ── Hide only the Streamlit deploy/share menu — NOT the sidebar toggle ── */
+  #MainMenu { visibility: hidden; }
+  footer { visibility: hidden; }
+  header { visibility: hidden; }
 
   /* ── Typography ── */
   h1, h2, h3, h4 { color: #e6edf3 !important; font-family: 'Inter', sans-serif; }
@@ -1653,96 +1677,85 @@ def render_master_score(master: Dict):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_sidebar() -> Tuple[str, str, str, str]:
-    st.sidebar.markdown("""
-    <div style="text-align:center; padding: 16px 0 8px;">
-      <div style="font-size:24px;">🇮🇳</div>
-      <div style="font-size:16px; font-weight:700; color:#e6edf3;">Market Intelligence</div>
-      <div style="font-size:11px; color:#8b949e;">Institutional Grade · NSE/BSE</div>
-    </div>
-    """, unsafe_allow_html=True)
+    with st.sidebar:
+        st.markdown("""
+        <div style="text-align:center; padding: 16px 0 8px;">
+          <div style="font-size:24px;">&#x1F1EE;&#x1F1F3;</div>
+          <div style="font-size:16px; font-weight:700; color:#e6edf3;">Market Intelligence</div>
+          <div style="font-size:11px; color:#8b949e;">Institutional Grade · NSE/BSE</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown('<div class="sidebar-label">Search Any NSE / BSE Stock</div>', unsafe_allow_html=True)
+        st.divider()
+        st.markdown("**🔍 Search NSE / BSE Stock**")
 
-    # ── Live search input ──────────────────────────────────────────────────────
-    search_query = st.sidebar.text_input(
-        "", placeholder="Type symbol e.g. RELIANCE, ZOMATO, IRFC",
-        key="stock_search", label_visibility="collapsed",
-    )
-
-    # Determine results to show
-    if search_query and len(search_query.strip()) >= 1:
-        results = search_nse_stocks(search_query)
-    else:
-        results = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN",
-                   "WIPRO","HCLTECH","BAJFINANCE","KOTAKBANK","HINDUNILVR",
-                   "ITC","SUNPHARMA","MARUTI","ZOMATO","PAYTM","IRFC","LT"]
-
-    if not results:
-        st.sidebar.warning("No stocks found. Try a different symbol.")
-        results = ["RELIANCE"]
-
-    # Persist last selected symbol so it survives re-runs
-    if "selected_symbol" not in st.session_state:
-        st.session_state.selected_symbol = "RELIANCE"
-
-    symbol = st.sidebar.selectbox(
-        "Select stock",
-        results,
-        index=0,
-        label_visibility="collapsed",
-        key="symbol_select",
-    )
-    st.session_state.selected_symbol = symbol
-
-    st.sidebar.markdown(
-        '<div style="font-size:11px;color:#8b949e;margin-top:4px;">' +
-        f'Showing {len(results)} result(s) · Type to search 1500+ NSE/BSE stocks' +
-        '</div>', unsafe_allow_html=True,
-    )
-
-    st.sidebar.markdown("---")
-    st.sidebar.markdown('<div class="sidebar-label">API Configuration</div>', unsafe_allow_html=True)
-
-    with st.sidebar.expander("🔑 API Keys (Optional)", expanded=False):
-        fmp_key    = st.text_input("FMP API Key",    type="password", placeholder="fmp_xxxxxxxx")
-        finnhub_key= st.text_input("Finnhub Key",    type="password", placeholder="xxxxxxxxxxxxxxx")
-        tavily_key = st.text_input("Tavily API Key", type="password", placeholder="tvly-xxxxxxxx")
-
-    st.sidebar.markdown("---")
-    vix = fetch_india_vix()
-    vix_color = "#f85149" if vix > 22 else "#e3b341" if vix > 17 else "#3fb950"
-    st.sidebar.markdown(f"""
-    <div class="sidebar-section">
-      <div class="sidebar-label">India VIX (Live)</div>
-      <div style="font-size:28px; font-weight:700; color:{vix_color};">{vix:.1f}</div>
-      <div style="font-size:11px; color:#8b949e; margin-top:2px;">
-        {'🛡 DEFENSIVE MODE ACTIVE' if vix > 22 else '✅ Normal Market Regime'}
-      </div>
-    </div>""", unsafe_allow_html=True)
-
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("""
-    <div style="font-size:11px; color:#8b949e; padding: 4px 0; line-height:1.7;">
-    📊 Price Data: jugaad-data / nselib<br>
-    📈 Fundamentals: FMP API<br>
-    🤖 Sentiment: FinBERT<br>
-    🔍 Research: Tavily AI<br>
-    ⚡ Indicators: In-house engine
-    </div>""", unsafe_allow_html=True)
-
-    with st.sidebar.expander("🧠 AI Agent (Anthropic)", expanded=False):
-        anthropic_key = st.text_input(
-            "Anthropic API Key",
-            type="password",
-            placeholder="sk-ant-api03-...",
-            help="Get free key at console.anthropic.com — powers full Claude AI verdict",
+        # ── Live search input ────────────────────────────────────────────────
+        search_query = st.text_input(
+            "Stock Symbol", placeholder="e.g. RELIANCE, ZOMATO, IRFC",
+            key="stock_search", label_visibility="visible",
         )
-        if anthropic_key and anthropic_key.startswith("sk-ant"):
-            st.sidebar.markdown(
-                '<div style="font-size:11px;color:#3fb950;margin-top:4px;">✅ Claude AI active</div>',
-                unsafe_allow_html=True,
+
+        # Determine results to show
+        if search_query and len(search_query.strip()) >= 1:
+            results = search_nse_stocks(search_query)
+        else:
+            results = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN",
+                       "WIPRO","HCLTECH","BAJFINANCE","KOTAKBANK","HINDUNILVR",
+                       "ITC","SUNPHARMA","MARUTI","ZOMATO","PAYTM","IRFC","LT"]
+
+        if not results:
+            st.warning("No stocks found. Try a different symbol.")
+            results = ["RELIANCE"]
+
+        if "selected_symbol" not in st.session_state:
+            st.session_state.selected_symbol = "RELIANCE"
+
+        symbol = st.selectbox(
+            "Select stock to analyse",
+            results,
+            index=0,
+            key="symbol_select",
+        )
+        st.session_state.selected_symbol = symbol
+        st.caption(f"{len(results)} result(s) · 1500+ NSE/BSE stocks available")
+
+        st.divider()
+        st.markdown("**🔑 API Keys (Optional)**")
+        with st.expander("Configure API Keys", expanded=False):
+            fmp_key     = st.text_input("FMP API Key",    type="password", placeholder="fmp_xxxxxxxx")
+            finnhub_key = st.text_input("Finnhub Key",    type="password", placeholder="xxxxxxxxxxxxxxx")
+            tavily_key  = st.text_input("Tavily AI Key",  type="password", placeholder="tvly-xxxxxxxx")
+            anthropic_key = st.text_input(
+                "Anthropic Key (AI Agent)",
+                type="password",
+                placeholder="sk-ant-api03-...",
+                help="Get free key at console.anthropic.com",
             )
+            if anthropic_key and anthropic_key.startswith("sk-ant"):
+                st.success("Claude AI active")
+
+        st.divider()
+        vix = fetch_india_vix()
+        vix_color = "#f85149" if vix > 22 else "#e3b341" if vix > 17 else "#3fb950"
+        vix_status = "DEFENSIVE MODE" if vix > 22 else "Normal Regime"
+        st.markdown(
+            "<div class='sidebar-section'>"
+            "<div class='sidebar-label'>India VIX (Live)</div>"
+            "<div style='font-size:28px;font-weight:700;color:" + vix_color + ";'>" + str(round(vix,1)) + "</div>"
+            "<div style='font-size:11px;color:#8b949e;margin-top:2px;'>" + vix_status + "</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        st.divider()
+        st.markdown("""
+<div style="font-size:11px;color:#8b949e;line-height:1.8;">
+&#x1F4CA; Price: jugaad-data / nselib<br>
+&#x1F4C8; Fundamentals: FMP API<br>
+&#x1F916; Sentiment: FinBERT<br>
+&#x1F50D; Research: Tavily AI<br>
+&#x26A1; Indicators: In-house engine
+</div>""", unsafe_allow_html=True)
 
     return symbol, fmp_key or "", finnhub_key or "", tavily_key or "", anthropic_key or ""
 
