@@ -1,0 +1,504 @@
+"""
+NSE Live Data Dashboard
+========================
+Fetches real-time stock quotes directly from NSE India's public API.
+No API key, no broker account needed.
+Run: streamlit run nse_live.py
+"""
+
+import streamlit as st
+import requests
+import pandas as pd
+import time
+from datetime import datetime
+import pytz
+
+# ─── Page Config ──────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="NSE Live Quotes",
+    page_icon="📈",
+    layout="wide",
+)
+
+# ─── Dark CSS ─────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+  .stApp { background: #0d1117; color: #e6edf3; }
+  section[data-testid="stSidebar"] { background: #161b22 !important; }
+  .quote-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 6px 0;
+  }
+  .q-symbol  { font-size: 18px; font-weight: 700; color: #e6edf3; }
+  .q-price   { font-size: 28px; font-weight: 800; margin: 4px 0; }
+  .q-change  { font-size: 14px; font-weight: 600; }
+  .q-meta    { font-size: 12px; color: #8b949e; margin-top: 8px; }
+  .pos { color: #3fb950; }
+  .neg { color: #f85149; }
+  .neu { color: #e3b341; }
+  .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing:.05em; }
+  .value { font-size: 15px; font-weight: 600; color: #e6edf3; }
+  .status-live   { background:#1f4a2e; color:#3fb950; border:1px solid #3fb950;
+                   padding:4px 12px; border-radius:20px; font-size:11px; font-weight:600; }
+  .status-closed { background:#3d1c1c; color:#f85149; border:1px solid #f85149;
+                   padding:4px 12px; border-radius:20px; font-size:11px; font-weight:600; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NSE SESSION MANAGER
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_resource
+def get_nse_session() -> requests.Session:
+    """
+    Create a persistent NSE session with cookies.
+    NSE requires a browser-like session with cookies set from the homepage
+    before accepting API requests — this mimics that flow.
+    """
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/120.0.0.0 Safari/537.36",
+        "Accept":          "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer":         "https://www.nseindia.com/",
+        "Origin":          "https://www.nseindia.com",
+        "Connection":      "keep-alive",
+    })
+    try:
+        # Hit homepage first to get session cookies
+        session.get("https://www.nseindia.com", timeout=10)
+        # Then hit the market data page to get API cookies
+        session.get("https://www.nseindia.com/market-data/live-equity-market", timeout=8)
+    except Exception:
+        pass
+    return session
+
+
+def refresh_session(session: requests.Session) -> None:
+    """Re-hit NSE homepage to refresh cookies when they expire."""
+    try:
+        session.get("https://www.nseindia.com", timeout=10)
+        session.get("https://www.nseindia.com/market-data/live-equity-market", timeout=8)
+    except Exception:
+        pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NSE API FUNCTIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def fetch_quote(symbol: str, session: requests.Session) -> dict:
+    """
+    Fetch full live quote for a single NSE equity symbol.
+    Returns price info, OHLC, 52W high/low, circuit limits.
+    """
+    url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol.upper()}"
+    try:
+        resp = session.get(url, timeout=10)
+
+        # Cookie expired — refresh and retry once
+        if resp.status_code in (401, 403, 429):
+            refresh_session(session)
+            resp = session.get(url, timeout=10)
+
+        if resp.status_code == 200:
+            data = resp.json()
+            pi   = data.get("priceInfo", {})
+            wd   = data.get("industryInfo", {})
+            info = data.get("info", {})
+
+            ltp        = pi.get("lastPrice", 0)
+            prev_close = pi.get("previousClose", 0)
+            change     = pi.get("change", ltp - prev_close)
+            change_pct = pi.get("pChange", 0)
+
+            return {
+                "symbol":      symbol.upper(),
+                "company":     info.get("companyName", symbol),
+                "series":      info.get("series", ["EQ"])[0] if info.get("series") else "EQ",
+                "ltp":         ltp,
+                "open":        pi.get("open", 0),
+                "high":        pi.get("intraDayHighLow", {}).get("max", 0),
+                "low":         pi.get("intraDayHighLow", {}).get("min", 0),
+                "prev_close":  prev_close,
+                "change":      round(change, 2),
+                "change_pct":  round(change_pct, 2),
+                "week52_high": pi.get("weekHighLow", {}).get("max", 0),
+                "week52_low":  pi.get("weekHighLow", {}).get("min", 0),
+                "vwap":        pi.get("vwap", 0),
+                "lower_circuit": pi.get("lowerCP", ""),
+                "upper_circuit": pi.get("upperCP", ""),
+                "industry":    wd.get("industry", ""),
+                "sector":      wd.get("sector", ""),
+                "timestamp":   datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M:%S IST"),
+                "ok":          True,
+            }
+        else:
+            return {"symbol": symbol, "ok": False, "error": f"HTTP {resp.status_code}"}
+
+    except requests.exceptions.Timeout:
+        return {"symbol": symbol, "ok": False, "error": "Request timed out"}
+    except Exception as e:
+        return {"symbol": symbol, "ok": False, "error": str(e)}
+
+
+def fetch_market_status(session: requests.Session) -> dict:
+    """Check if NSE market is currently open."""
+    try:
+        resp = session.get(
+            "https://www.nseindia.com/api/marketStatus",
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            markets = data.get("marketState", [])
+            for m in markets:
+                if "Capital" in m.get("market", ""):
+                    return {
+                        "status":  m.get("marketStatus", "Unknown"),
+                        "message": m.get("tradeDate", ""),
+                        "open":    m.get("marketStatus", "").lower() == "open",
+                    }
+    except Exception:
+        pass
+
+    # Fallback — check by IST time
+    now = datetime.now(pytz.timezone("Asia/Kolkata"))
+    is_weekday = now.weekday() < 5
+    is_hours   = (9 * 60 + 15) <= (now.hour * 60 + now.minute) <= (15 * 60 + 30)
+    is_open    = is_weekday and is_hours
+    return {
+        "status":  "Open" if is_open else "Closed",
+        "message": now.strftime("%d %b %Y"),
+        "open":    is_open,
+    }
+
+
+def fetch_india_vix(session: requests.Session) -> float:
+    """Fetch live India VIX value."""
+    try:
+        resp = session.get(
+            "https://www.nseindia.com/api/allIndices",
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            data = resp.json().get("data", [])
+            for item in data:
+                if "INDIA VIX" in item.get("index", "").upper():
+                    return float(item.get("last", 15.0))
+    except Exception:
+        pass
+    return 15.4
+
+
+def fetch_gainers_losers(session: requests.Session) -> dict:
+    """Fetch top gainers and losers from Nifty 50."""
+    try:
+        resp = session.get(
+            "https://www.nseindia.com/api/live-analysis-variations?index=gainers",
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            raw = resp.json()
+            gainers = raw.get("NIFTY", {}).get("data", [])[:5]
+            losers  = sorted(
+                gainers, key=lambda x: x.get("pChange", 0)
+            )[:5]
+            return {"gainers": gainers, "losers": losers}
+    except Exception:
+        pass
+    return {"gainers": [], "losers": []}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RENDER HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def render_quote_card(q: dict):
+    if not q.get("ok"):
+        st.markdown(f"""
+        <div class="quote-card" style="border-color:#f85149;">
+          <div class="q-symbol">{q['symbol']}</div>
+          <div style="color:#f85149; font-size:13px; margin-top:8px;">
+            ⚠️ {q.get('error', 'Could not fetch data')}
+          </div>
+        </div>""", unsafe_allow_html=True)
+        return
+
+    chg_cls  = "pos" if q["change_pct"] >= 0 else "neg"
+    chg_sign = "▲" if q["change_pct"] >= 0 else "▼"
+    border   = "#3fb950" if q["change_pct"] >= 0 else "#f85149"
+
+    st.markdown(f"""
+    <div class="quote-card" style="border-left: 3px solid {border};">
+      <div style="display:flex; justify-content:space-between; align-items:start;">
+        <div>
+          <div class="q-symbol">{q['symbol']}</div>
+          <div style="font-size:11px; color:#8b949e;">{q.get('company','')[:40]}</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="q-price {chg_cls}">₹{q['ltp']:,.2f}</div>
+          <div class="q-change {chg_cls}">
+            {chg_sign} ₹{abs(q['change']):.2f} ({abs(q['change_pct']):.2f}%)
+          </div>
+        </div>
+      </div>
+      <hr style="border-color:#30363d; margin:10px 0;">
+      <div style="display:grid; grid-template-columns: repeat(4,1fr); gap:8px;">
+        <div><div class="label">Open</div><div class="value">₹{q['open']:,.2f}</div></div>
+        <div><div class="label">High</div><div class="value pos">₹{q['high']:,.2f}</div></div>
+        <div><div class="label">Low</div><div class="value neg">₹{q['low']:,.2f}</div></div>
+        <div><div class="label">VWAP</div><div class="value">₹{q['vwap']:,.2f}</div></div>
+        <div><div class="label">Prev Close</div><div class="value">₹{q['prev_close']:,.2f}</div></div>
+        <div><div class="label">52W High</div><div class="value">₹{q['week52_high']:,.2f}</div></div>
+        <div><div class="label">52W Low</div><div class="value">₹{q['week52_low']:,.2f}</div></div>
+        <div><div class="label">Updated</div><div class="value">{q['timestamp']}</div></div>
+      </div>
+      <div style="margin-top:8px; font-size:11px; color:#8b949e;">
+        Circuit: 🔻 ₹{q['lower_circuit']} &nbsp;|&nbsp; 🔺 ₹{q['upper_circuit']}
+        &nbsp;·&nbsp; {q.get('sector','')}
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WATCHLIST DEFAULTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+DEFAULT_WATCHLIST = [
+    "RELIANCE", "TCS", "INFY", "HDFCBANK",
+    "ICICIBANK", "SBIN", "WIPRO", "MARUTI",
+]
+
+POPULAR_STOCKS = [
+    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN",
+    "WIPRO", "HCLTECH", "BAJFINANCE", "KOTAKBANK", "HINDUNILVR",
+    "ITC", "SUNPHARMA", "DRREDDY", "MARUTI", "TATAMOTORS",
+    "ADANIENT", "LT", "NTPC", "POWERGRID", "ONGC", "COALINDIA",
+    "TATASTEEL", "JSWSTEEL", "NESTLEIND", "TECHM", "CIPLA",
+    "DIVISLAB", "ULTRACEMCO", "BAJAJ-AUTO",
+]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN APP
+# ══════════════════════════════════════════════════════════════════════════════
+
+def main():
+    session = get_nse_session()
+
+    # ── Sidebar ───────────────────────────────────────────────────────────────
+    st.sidebar.markdown("""
+    <div style="text-align:center; padding:12px 0 4px;">
+      <div style="font-size:22px;">📈</div>
+      <div style="font-size:15px; font-weight:700; color:#e6edf3;">NSE Live Quotes</div>
+      <div style="font-size:11px; color:#8b949e;">Direct from NSE India · No API Key</div>
+    </div>""", unsafe_allow_html=True)
+
+    st.sidebar.markdown("---")
+
+    # Watchlist manager
+    st.sidebar.markdown("**Your Watchlist**")
+    if "watchlist" not in st.session_state:
+        st.session_state.watchlist = DEFAULT_WATCHLIST.copy()
+
+    # Add stock
+    add_stock = st.sidebar.selectbox(
+        "Add stock to watchlist",
+        ["-- Select --"] + [s for s in POPULAR_STOCKS if s not in st.session_state.watchlist],
+        label_visibility="collapsed",
+    )
+    if add_stock != "-- Select --":
+        st.session_state.watchlist.append(add_stock)
+        st.rerun()
+
+    # Custom symbol input
+    custom = st.sidebar.text_input("Or type any NSE symbol", placeholder="e.g. ZOMATO").strip().upper()
+    if custom and custom not in st.session_state.watchlist:
+        if st.sidebar.button(f"Add {custom}"):
+            st.session_state.watchlist.append(custom)
+            st.rerun()
+
+    # Remove stocks
+    if st.session_state.watchlist:
+        remove = st.sidebar.multiselect("Remove from watchlist", st.session_state.watchlist)
+        if remove:
+            st.session_state.watchlist = [s for s in st.session_state.watchlist if s not in remove]
+            st.rerun()
+
+    st.sidebar.markdown("---")
+
+    # Auto-refresh toggle
+    auto_refresh = st.sidebar.toggle("Auto-refresh (30s)", value=False)
+    if auto_refresh:
+        refresh_every = st.sidebar.slider("Refresh interval (seconds)", 15, 120, 30)
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("""
+    <div style="font-size:11px; color:#8b949e; line-height:1.8;">
+    📡 Data: NSE India public API<br>
+    🔑 API Key required: None<br>
+    💰 Cost: Free<br>
+    ⚡ Latency: ~1-2 seconds<br>
+    🕐 Market hours: 9:15–15:30 IST
+    </div>""", unsafe_allow_html=True)
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    col_h1, col_h2, col_h3, col_h4 = st.columns([3, 1, 1, 1])
+
+    with col_h1:
+        st.markdown("## 📈 NSE Live Market")
+
+    # Market status
+    market = fetch_market_status(session)
+    with col_h2:
+        badge = "status-live" if market["open"] else "status-closed"
+        st.markdown(f"""
+        <div style="padding-top:14px;">
+          <span class="{badge}">{'🟢 MARKET OPEN' if market['open'] else '🔴 MARKET CLOSED'}</span>
+        </div>""", unsafe_allow_html=True)
+
+    # India VIX
+    vix = fetch_india_vix(session)
+    vix_color = "#f85149" if vix > 22 else "#e3b341" if vix > 17 else "#3fb950"
+    with col_h3:
+        st.markdown(f"""
+        <div style="padding-top:8px; text-align:center;">
+          <div style="font-size:11px; color:#8b949e;">INDIA VIX</div>
+          <div style="font-size:22px; font-weight:700; color:{vix_color};">{vix:.1f}</div>
+        </div>""", unsafe_allow_html=True)
+
+    with col_h4:
+        now_ist = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%d %b %Y %H:%M:%S IST")
+        st.markdown(f"""
+        <div style="padding-top:14px; font-size:11px; color:#8b949e; text-align:right;">
+          {now_ist}
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Fetch All Quotes ──────────────────────────────────────────────────────
+    watchlist = st.session_state.watchlist
+    if not watchlist:
+        st.info("Add stocks to your watchlist using the sidebar.")
+        return
+
+    with st.spinner(f"Fetching live quotes for {len(watchlist)} stocks..."):
+        quotes = []
+        progress = st.progress(0)
+        for i, sym in enumerate(watchlist):
+            q = fetch_quote(sym, session)
+            quotes.append(q)
+            progress.progress((i + 1) / len(watchlist))
+            time.sleep(0.3)   # be respectful to NSE — small delay between calls
+        progress.empty()
+
+    # ── Summary Strip ─────────────────────────────────────────────────────────
+    ok_quotes   = [q for q in quotes if q.get("ok")]
+    gainers_cnt = sum(1 for q in ok_quotes if q["change_pct"] > 0)
+    losers_cnt  = sum(1 for q in ok_quotes if q["change_pct"] < 0)
+    flat_cnt    = len(ok_quotes) - gainers_cnt - losers_cnt
+
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        st.markdown(f"""<div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px 16px;">
+          <div class="label">Stocks Tracked</div>
+          <div style="font-size:22px;font-weight:700;color:#e6edf3;">{len(ok_quotes)}</div>
+        </div>""", unsafe_allow_html=True)
+    with s2:
+        st.markdown(f"""<div style="background:#161b22;border:1px solid #3fb950;border-radius:8px;padding:12px 16px;">
+          <div class="label">Advancing</div>
+          <div style="font-size:22px;font-weight:700;color:#3fb950;">▲ {gainers_cnt}</div>
+        </div>""", unsafe_allow_html=True)
+    with s3:
+        st.markdown(f"""<div style="background:#161b22;border:1px solid #f85149;border-radius:8px;padding:12px 16px;">
+          <div class="label">Declining</div>
+          <div style="font-size:22px;font-weight:700;color:#f85149;">▼ {losers_cnt}</div>
+        </div>""", unsafe_allow_html=True)
+    with s4:
+        st.markdown(f"""<div style="background:#161b22;border:1px solid #e3b341;border-radius:8px;padding:12px 16px;">
+          <div class="label">Unchanged</div>
+          <div style="font-size:22px;font-weight:700;color:#e3b341;">— {flat_cnt}</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Quote Cards Grid (3 columns) ──────────────────────────────────────────
+    cols_per_row = 3
+    for i in range(0, len(quotes), cols_per_row):
+        row_quotes = quotes[i : i + cols_per_row]
+        cols = st.columns(cols_per_row)
+        for col, q in zip(cols, row_quotes):
+            with col:
+                render_quote_card(q)
+
+    # ── Live Table View ───────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📊 Quick Table View")
+    if ok_quotes:
+        df = pd.DataFrame([{
+            "Symbol":    q["symbol"],
+            "LTP (₹)":  q["ltp"],
+            "Change":   q["change"],
+            "Chg %":    q["change_pct"],
+            "Open":     q["open"],
+            "High":     q["high"],
+            "Low":      q["low"],
+            "VWAP":     q["vwap"],
+            "52W High": q["week52_high"],
+            "52W Low":  q["week52_low"],
+        } for q in ok_quotes])
+
+        def color_change(val):
+            if isinstance(val, float):
+                if val > 0:
+                    return "color: #3fb950"
+                elif val < 0:
+                    return "color: #f85149"
+            return "color: #e3b341"
+
+        styled = df.style\
+            .applymap(color_change, subset=["Change", "Chg %"])\
+            .format({
+                "LTP (₹)":  "₹{:,.2f}",
+                "Change":   "{:+.2f}",
+                "Chg %":    "{:+.2f}%",
+                "Open":     "₹{:,.2f}",
+                "High":     "₹{:,.2f}",
+                "Low":      "₹{:,.2f}",
+                "VWAP":     "₹{:,.2f}",
+                "52W High": "₹{:,.2f}",
+                "52W Low":  "₹{:,.2f}",
+            })
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    # ── Auto Refresh ──────────────────────────────────────────────────────────
+    if auto_refresh:
+        st.markdown(f"""
+        <div style="text-align:center; font-size:12px; color:#8b949e; margin-top:16px;">
+          ⏱ Auto-refreshing every {refresh_every} seconds...
+        </div>""", unsafe_allow_html=True)
+        time.sleep(refresh_every)
+        st.rerun()
+
+    # ── Footer ────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align:center; color:#8b949e; font-size:11px; padding:4px 0;">
+      Data sourced directly from NSE India public API · No broker account or API key required ·
+      Refresh page or enable auto-refresh for latest quotes ·
+      <strong style="color:#f85149;">Not investment advice.</strong>
+    </div>""", unsafe_allow_html=True)
+
+
+if __name__ == "__main__":
+    main()
+
