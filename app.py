@@ -161,6 +161,67 @@ st.markdown("""
 
   /* ── Plotly bg transparency ── */
   .js-plotly-plot .plotly .bg { fill: transparent !important; }
+
+  /* ── AI Agent Card ── */
+  .ai-agent-card {
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+    border: 1px solid #30363d;
+    border-radius: 14px;
+    padding: 24px 28px;
+    margin: 16px 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .ai-agent-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #58a6ff, #3fb950, #d2a8ff, #f78166);
+  }
+  .ai-verdict-header {
+    font-size: 11px; color: #58a6ff; text-transform: uppercase;
+    letter-spacing: 0.1em; font-weight: 600; margin-bottom: 12px;
+  }
+  .ai-verdict-main {
+    font-size: 32px; font-weight: 800; margin: 0;
+  }
+  .ai-verdict-sub {
+    font-size: 13px; color: #8b949e; margin-top: 4px;
+  }
+  .ai-target-box {
+    background: #1c2128; border: 1px solid #30363d;
+    border-radius: 10px; padding: 14px 18px; text-align: center;
+  }
+  .ai-target-label { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing:.06em; }
+  .ai-target-val   { font-size: 20px; font-weight: 700; margin: 4px 0; }
+  .ai-target-upside{ font-size: 12px; font-weight: 600; }
+  .ai-reasoning-block {
+    background: #161b22; border-radius: 10px;
+    padding: 14px 18px; margin: 10px 0;
+  }
+  .ai-reasoning-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .06em; margin-bottom: 8px;
+  }
+  .ai-reasoning-item {
+    font-size: 13px; color: #c9d1d9; line-height: 1.7;
+    padding: 3px 0; border-bottom: 1px solid #21262d;
+  }
+  .ai-reasoning-item:last-child { border-bottom: none; }
+  .ai-conviction {
+    background: #1c2128; border-radius: 10px; padding: 14px 18px;
+    font-size: 14px; color: #e6edf3; font-style: italic;
+    line-height: 1.7; border-left: 3px solid #58a6ff; margin-top: 12px;
+  }
+  .ai-badge-buy    { color: #3fb950; }
+  .ai-badge-sell   { color: #f85149; }
+  .ai-badge-hold   { color: #e3b341; }
+  .ai-badge-acc    { color: #58a6ff; }
+  .ai-loading {
+    text-align: center; padding: 32px;
+    color: #8b949e; font-size: 14px;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -712,6 +773,378 @@ def compute_technicals(df: pd.DataFrame) -> Dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# AI AGENT — CLAUDE-POWERED STOCK ANALYST
+# ══════════════════════════════════════════════════════════════════════════════
+
+def call_ai_agent(
+    symbol: str,
+    sector: str,
+    current_price: float,
+    day_chg: float,
+    technicals: Dict,
+    fundamentals: Dict,
+    master: Dict,
+    news: List[Dict],
+    sentiments: List[Dict],
+    projects: List[Dict],
+    vix: float,
+    anthropic_key: str,
+) -> Dict:
+    """
+    Send all collected data to Claude and get a structured
+    short-term + long-term investment verdict with targets,
+    stop loss, bull/bear case, risk factors, and conviction.
+    Returns a dict with the parsed verdict.
+    """
+
+    # ── Build the data brief ─────────────────────────────────────────────────
+    pos_news = sum(1 for s in sentiments if s.get("label") == "positive")
+    neg_news = sum(1 for s in sentiments if s.get("label") == "negative")
+    news_titles = [n.get("headline","") for n in news[:5]]
+    project_titles = [p.get("title","") for p in projects[:3]]
+
+    avg_de  = round(float(np.mean(fundamentals["de"])),  2) if fundamentals.get("de")  else "N/A"
+    avg_roe = round(float(np.mean(fundamentals["roe"])), 2) if fundamentals.get("roe") else "N/A"
+    avg_npm = round(float(np.mean(fundamentals["npm"])), 2) if fundamentals.get("npm") else "N/A"
+
+    brief = f"""You are an elite Indian equity research analyst with 20 years of experience
+covering NSE/BSE markets. Analyse the following real-time data for {symbol} and
+give a precise, actionable investment verdict.
+
+══ STOCK SNAPSHOT ══
+Symbol        : {symbol}
+Sector        : {sector}
+Current Price : ₹{current_price:,.2f}
+Day Change    : {day_chg:+.2f}%
+India VIX     : {vix:.1f} {"[DEFENSIVE MODE]" if vix > 22 else "[NORMAL]"}
+
+══ TECHNICAL PICTURE ══
+RSI (14D)     : {technicals["rsi"]} {"(Overbought)" if technicals["rsi"]>70 else "(Oversold)" if technicals["rsi"]<30 else "(Neutral)"}
+MACD          : {technicals["macd"]} vs Signal {technicals["macd_signal"]} → {"Bullish crossover" if technicals["macd"]>technicals["macd_signal"] else "Bearish crossover"}
+ADX           : {technicals["adx"]} {"(Strong trend)" if technicals["adx"]>25 else "(Weak/ranging)"}
+Volume Ratio  : {technicals["vol_ratio"]}x 20-day average
+52W High      : ₹{technicals["week52_high"]:,.2f} | 52W Low: ₹{technicals["week52_low"]:,.2f}
+From 52W High : {technicals["pct_from_high"]:+.1f}%
+5-Year CAGR   : {technicals["cagr_5y"]}%
+BB Upper      : ₹{technicals["bb_upper"]:,.2f} | BB Lower: ₹{technicals["bb_lower"]:,.2f}
+
+══ FUNDAMENTAL HEALTH (5-YEAR AVERAGES) ══
+Debt/Equity   : {avg_de}
+ROE           : {avg_roe}%
+Net Profit Margin : {avg_npm}%
+
+══ NEWS SENTIMENT ══
+Positive articles: {pos_news} | Negative: {neg_news} out of {len(sentiments)} analysed
+Recent headlines:
+{chr(10).join(f"• {t}" for t in news_titles)}
+
+══ AI-RESEARCHED CATALYSTS ══
+{chr(10).join(f"• {t}" for t in project_titles) if project_titles else "• No major catalysts found"}
+
+══ MASTER SCORE ══
+Overall Score : {master["score"]}/100
+Technical     : {master["tech_s"]}/35
+Fundamental   : {master["fund_s"]}/35
+Sentiment     : {master["sent_s"]}/30
+
+══ YOUR TASK ══
+Based on ALL the above data, provide a JSON response (and ONLY JSON, no markdown, no preamble) in exactly this structure:
+
+{{
+  "short_term": {{
+    "verdict": "STRONG BUY | BUY | ACCUMULATE | HOLD | REDUCE | SELL | AVOID",
+    "horizon": "1-3 months",
+    "target_price": <number or null>,
+    "stop_loss": <number>,
+    "upside_pct": <number or null>,
+    "confidence": "HIGH | MEDIUM | LOW",
+    "reasoning": ["reason 1", "reason 2", "reason 3"]
+  }},
+  "long_term": {{
+    "verdict": "STRONG BUY | BUY | ACCUMULATE | HOLD | REDUCE | SELL | AVOID",
+    "horizon": "12-36 months",
+    "target_price": <number or null>,
+    "stop_loss": <number>,
+    "upside_pct": <number or null>,
+    "confidence": "HIGH | MEDIUM | LOW",
+    "reasoning": ["reason 1", "reason 2", "reason 3"]
+  }},
+  "bull_case": ["key bull argument 1", "key bull argument 2", "key bull argument 3"],
+  "bear_case": ["key risk 1", "key risk 2", "key risk 3"],
+  "key_risks": ["risk 1", "risk 2"],
+  "conviction_statement": "One powerful sentence summing up your overall view on this stock right now.",
+  "suggested_strategy": "e.g. SIP entry over 3 months | Lump sum at current levels | Wait for dip to ₹X | Trail stop at ₹X"
+}}
+
+Be specific with price targets — calculate them based on the current price ₹{current_price:,.2f}.
+Stop loss must be a specific ₹ number, not a percentage.
+Do not add any text outside the JSON."""
+
+    # ── Call Anthropic API ───────────────────────────────────────────────────
+    if not anthropic_key or not anthropic_key.strip().startswith("sk-ant"):
+        return _fallback_verdict(master, current_price, technicals)
+
+    try:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key":         anthropic_key.strip(),
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+            json={
+                "model":      "claude-opus-4-6",
+                "max_tokens": 1500,
+                "messages":   [{"role": "user", "content": brief}],
+            },
+            timeout=45,
+        )
+        if resp.status_code == 200:
+            raw = resp.json()["content"][0]["text"].strip()
+            # Strip any accidental markdown fences
+            raw = re.sub(r"^```json\s*", "", raw)
+            raw = re.sub(r"```\s*$",     "", raw)
+            verdict = json.loads(raw)
+            verdict["_source"] = "claude"
+            return verdict
+        else:
+            return _fallback_verdict(master, current_price, technicals)
+    except Exception:
+        return _fallback_verdict(master, current_price, technicals)
+
+
+def _fallback_verdict(master: Dict, price: float, tech: Dict) -> Dict:
+    """Rule-based fallback when no Anthropic key is provided."""
+    score = master["score"]
+    st_v  = master["verdict"]
+    lt_v  = "BUY" if score >= 55 else "HOLD" if score >= 40 else "REDUCE"
+
+    st_target = round(price * (1 + max(0.05, tech["cagr_5y"] / 100 * 0.5)), 2) if score >= 55 else None
+    lt_target = round(price * (1 + max(0.15, tech["cagr_5y"] / 100 * 2.0)), 2) if score >= 40 else None
+    stop      = round(price * 0.93, 2)
+
+    return {
+        "short_term": {
+            "verdict":     st_v,
+            "horizon":     "1-3 months",
+            "target_price":st_target,
+            "stop_loss":   stop,
+            "upside_pct":  round((st_target / price - 1) * 100, 1) if st_target else None,
+            "confidence":  "HIGH" if score >= 70 else "MEDIUM" if score >= 50 else "LOW",
+            "reasoning":   [
+                f"Master Score of {score}/100 {'supports' if score>=55 else 'does not support'} buying",
+                f"RSI at {tech['rsi']} — {'momentum intact' if 40<tech['rsi']<70 else 'overbought' if tech['rsi']>=70 else 'oversold — bounce potential'}",
+                f"MACD {'bullish' if tech['macd']>tech['macd_signal'] else 'bearish'} crossover in play",
+            ],
+        },
+        "long_term": {
+            "verdict":     lt_v,
+            "horizon":     "12-36 months",
+            "target_price":lt_target,
+            "stop_loss":   round(price * 0.80, 2),
+            "upside_pct":  round((lt_target / price - 1) * 100, 1) if lt_target else None,
+            "confidence":  "MEDIUM",
+            "reasoning":   [
+                f"5-Year CAGR of {tech['cagr_5y']}% shows {'strong' if tech['cagr_5y']>=12 else 'moderate'} compounding",
+                "Fundamental score reflects balance sheet health",
+                "Sector policy tailwinds provide structural support",
+            ],
+        },
+        "bull_case":  ["Strong technical momentum", "Improving fundamentals", "Positive macro environment"],
+        "bear_case":  ["Market-wide correction risk", "Sector rotation possible", "Global headwinds from VIX"],
+        "key_risks":  ["India VIX elevated — systemic risk", "Earnings miss could trigger selloff"],
+        "conviction_statement": f"Score of {score}/100 — {master['verdict']} with {master['horizon']}.",
+        "suggested_strategy":   "Add Anthropic API key in sidebar for a full AI-generated strategy.",
+        "_source":              "fallback",
+    }
+
+
+def render_ai_verdict(
+    verdict: Dict,
+    symbol: str,
+    current_price: float,
+    has_api_key: bool,
+):
+    """Render the full AI agent verdict card."""
+    st_data = verdict.get("short_term", {})
+    lt_data = verdict.get("long_term",  {})
+    is_claude = verdict.get("_source") == "claude"
+
+    # ── Colour mapping ────────────────────────────────────────────────────────
+    def verd_color(v):
+        return {
+            "STRONG BUY": "#3fb950", "BUY": "#3fb950",
+            "ACCUMULATE": "#58a6ff", "HOLD": "#e3b341",
+            "REDUCE": "#f0883e",     "SELL": "#f85149",
+            "AVOID": "#f85149",
+        }.get(v, "#e3b341")
+
+    def conf_badge(c):
+        return {
+            "HIGH":   ("🟢", "#3fb950"), "MEDIUM": ("🟡", "#e3b341"),
+            "LOW":    ("🔴", "#f85149"),
+        }.get(c, ("⚪", "#8b949e"))
+
+    st_color = verd_color(st_data.get("verdict", "HOLD"))
+    lt_color = verd_color(lt_data.get("verdict", "HOLD"))
+    st_conf_icon, st_conf_color = conf_badge(st_data.get("confidence", "MEDIUM"))
+    lt_conf_icon, lt_conf_color = conf_badge(lt_data.get("confidence", "MEDIUM"))
+
+    source_badge = (
+        '<span style="font-size:10px;background:#1f4a2e;color:#3fb950;'
+        'border:1px solid #3fb950;padding:2px 8px;border-radius:10px;margin-left:8px;">'
+        '🤖 Claude AI</span>'
+        if is_claude else
+        '<span style="font-size:10px;background:#232a35;color:#58a6ff;'
+        'border:1px solid #58a6ff;padding:2px 8px;border-radius:10px;margin-left:8px;">'
+        '⚙️ Rule Engine</span>'
+    )
+
+    if not has_api_key:
+        st.markdown("""
+        <div style="background:#1c2128;border:1px dashed #30363d;border-radius:10px;
+             padding:14px 18px;margin-bottom:8px;font-size:13px;color:#8b949e;">
+          🔑 Add your <strong style="color:#58a6ff;">Anthropic API Key</strong> in the sidebar
+          to unlock full Claude AI-powered verdict with precise price targets and strategy.
+          Without it, a rule-based fallback is shown below.
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div class="ai-agent-card">
+      <div class="ai-verdict-header">🧠 AI Agent Verdict {source_badge}</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+
+        <!-- Short Term -->
+        <div>
+          <div style="font-size:11px;color:#8b949e;text-transform:uppercase;
+               letter-spacing:.06em;margin-bottom:8px;">
+            Short Term · {st_data.get("horizon","1-3 months")}
+          </div>
+          <div class="ai-verdict-main" style="color:{st_color};">
+            {st_data.get("verdict","HOLD")}
+          </div>
+          <div class="ai-verdict-sub">
+            {st_conf_icon} <span style="color:{st_conf_color};">
+            {st_data.get("confidence","MEDIUM")} confidence</span>
+          </div>
+        </div>
+
+        <!-- Long Term -->
+        <div>
+          <div style="font-size:11px;color:#8b949e;text-transform:uppercase;
+               letter-spacing:.06em;margin-bottom:8px;">
+            Long Term · {lt_data.get("horizon","12-36 months")}
+          </div>
+          <div class="ai-verdict-main" style="color:{lt_color};">
+            {lt_data.get("verdict","HOLD")}
+          </div>
+          <div class="ai-verdict-sub">
+            {lt_conf_icon} <span style="color:{lt_conf_color};">
+            {lt_data.get("confidence","MEDIUM")} confidence</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Target / Stop Loss strip ──────────────────────────────────────────────
+    t1, t2, t3, t4 = st.columns(4)
+    with t1:
+        st_tp = st_data.get("target_price")
+        st_up = st_data.get("upside_pct")
+        st.markdown(f"""<div class="ai-target-box">
+          <div class="ai-target-label">ST Target</div>
+          <div class="ai-target-val" style="color:#3fb950;">
+            {"₹{:,.0f}".format(st_tp) if st_tp else "—"}
+          </div>
+          <div class="ai-target-upside" style="color:#3fb950;">
+            {"+{:.1f}%".format(st_up) if st_up else ""}
+          </div>
+        </div>""", unsafe_allow_html=True)
+    with t2:
+        st_sl = st_data.get("stop_loss")
+        st_sl_pct = round((st_sl / current_price - 1) * 100, 1) if st_sl else None
+        st.markdown(f"""<div class="ai-target-box">
+          <div class="ai-target-label">ST Stop Loss</div>
+          <div class="ai-target-val" style="color:#f85149;">
+            {"₹{:,.0f}".format(st_sl) if st_sl else "—"}
+          </div>
+          <div class="ai-target-upside" style="color:#f85149;">
+            {"{:.1f}%".format(st_sl_pct) if st_sl_pct else ""}
+          </div>
+        </div>""", unsafe_allow_html=True)
+    with t3:
+        lt_tp = lt_data.get("target_price")
+        lt_up = lt_data.get("upside_pct")
+        st.markdown(f"""<div class="ai-target-box">
+          <div class="ai-target-label">LT Target</div>
+          <div class="ai-target-val" style="color:#d2a8ff;">
+            {"₹{:,.0f}".format(lt_tp) if lt_tp else "—"}
+          </div>
+          <div class="ai-target-upside" style="color:#d2a8ff;">
+            {"+{:.1f}%".format(lt_up) if lt_up else ""}
+          </div>
+        </div>""", unsafe_allow_html=True)
+    with t4:
+        lt_sl = lt_data.get("stop_loss")
+        lt_sl_pct = round((lt_sl / current_price - 1) * 100, 1) if lt_sl else None
+        st.markdown(f"""<div class="ai-target-box">
+          <div class="ai-target-label">LT Stop Loss</div>
+          <div class="ai-target-val" style="color:#f85149;">
+            {"₹{:,.0f}".format(lt_sl) if lt_sl else "—"}
+          </div>
+          <div class="ai-target-upside" style="color:#f85149;">
+            {"{:.1f}%".format(lt_sl_pct) if lt_sl_pct else ""}
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+    # ── Bull / Bear / Strategy ────────────────────────────────────────────────
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        bull = verdict.get("bull_case", [])
+        items = "".join(
+            f'<div class="ai-reasoning-item">✅ {r}</div>' for r in bull
+        )
+        st.markdown(f"""<div class="ai-reasoning-block">
+          <div class="ai-reasoning-title" style="color:#3fb950;">🐂 Bull Case</div>
+          {items}
+        </div>""", unsafe_allow_html=True)
+    with b2:
+        bear = verdict.get("bear_case", [])
+        items = "".join(
+            f'<div class="ai-reasoning-item">⚠️ {r}</div>' for r in bear
+        )
+        st.markdown(f"""<div class="ai-reasoning-block">
+          <div class="ai-reasoning-title" style="color:#f85149;">🐻 Bear Case</div>
+          {items}
+        </div>""", unsafe_allow_html=True)
+    with b3:
+        risks = verdict.get("key_risks", [])
+        strat = verdict.get("suggested_strategy", "")
+        risk_items = "".join(
+            f'<div class="ai-reasoning-item">🔺 {r}</div>' for r in risks
+        )
+        st.markdown(f"""<div class="ai-reasoning-block">
+          <div class="ai-reasoning-title" style="color:#e3b341;">⚡ Strategy</div>
+          <div class="ai-reasoning-item" style="color:#58a6ff;font-weight:500;">
+            📋 {strat}
+          </div>
+          {risk_items}
+        </div>""", unsafe_allow_html=True)
+
+    # ── Conviction statement ──────────────────────────────────────────────────
+    conviction = verdict.get("conviction_statement", "")
+    if conviction:
+        st.markdown(f"""
+        <div class="ai-conviction">
+          💡 <strong style="color:#58a6ff;">AI Conviction:</strong> {conviction}
+        </div>""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MASTER SCORE ENGINE
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1145,7 +1578,21 @@ def render_sidebar() -> Tuple[str, str, str, str]:
     ⚡ Indicators: In-house engine
     </div>""", unsafe_allow_html=True)
 
-    return symbol, fmp_key or "", finnhub_key or "", tavily_key or ""
+    with st.sidebar.expander("🧠 AI Agent (Anthropic)", expanded=False):
+        anthropic_key = st.text_input(
+            "Anthropic API Key",
+            type="password",
+            placeholder="sk-ant-api03-...",
+            help="Get free key at console.anthropic.com — powers full Claude AI verdict",
+        )
+        if anthropic_key and anthropic_key.startswith("sk-ant"):
+            st.sidebar.markdown(
+                '<div style="font-size:11px;color:#3fb950;margin-top:4px;">✅ Claude AI active</div>',
+                unsafe_allow_html=True,
+            )
+
+    return symbol, fmp_key or "", finnhub_key or "", tavily_key or "", anthropic_key or ""
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1153,7 +1600,7 @@ def render_sidebar() -> Tuple[str, str, str, str]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    symbol, fmp_key, finnhub_key, tavily_key = render_sidebar()
+    symbol, fmp_key, finnhub_key, tavily_key, anthropic_key = render_sidebar()
 
     sector_name = _get_sector(symbol)
     vix = fetch_india_vix()
@@ -1215,6 +1662,27 @@ def main():
     with m6:
         render_metric_card("5Y CAGR", f"{technicals['cagr_5y']}%",
                            None, technicals["cagr_5y"] >= 10)
+
+    st.markdown("---")
+
+    # ── AI AGENT VERDICT ─────────────────────────────────────────────────────
+    has_key = bool(anthropic_key and anthropic_key.strip().startswith("sk-ant"))
+    with st.spinner("🧠 AI Agent is analysing all data..." if has_key else "⚙️ Generating rule-based verdict..."):
+        ai_verdict = call_ai_agent(
+            symbol        = symbol,
+            sector        = sector_name,
+            current_price = current_price,
+            day_chg       = day_chg,
+            technicals    = technicals,
+            fundamentals  = fundamentals,
+            master        = master,
+            news          = news,
+            sentiments    = sentiments,
+            projects      = projects,
+            vix           = vix,
+            anthropic_key = anthropic_key,
+        )
+    render_ai_verdict(ai_verdict, symbol, current_price, has_key)
 
     st.markdown("---")
 
