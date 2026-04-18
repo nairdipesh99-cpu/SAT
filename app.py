@@ -1316,9 +1316,11 @@ def chart_fundamentals(fundamentals: Dict) -> go.Figure:
     fig.update_layout(
         showlegend=False,
         height=300,
-        # top margin big enough for subplot titles + avoid clipping
         margin=dict(l=40, r=20, t=50, b=40),
-        **PLOTLY_DARK,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0d1117",
+        font=dict(color="#8b949e", size=11),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=10)),
     )
     return fig
 
@@ -1383,13 +1385,14 @@ def chart_score_radar(master: Dict) -> go.Figure:
                 gridcolor="#30363d",
                 tickfont=dict(size=12, color="#e6edf3"),
             ),
-            # shrink inner plot so labels don't get clipped
-            domain=dict(x=[0.05, 0.95], y=[0.05, 0.95]),
+            domain=dict(x=[0.08, 0.92], y=[0.08, 0.92]),
         ),
-        height=260,
+        height=270,
         showlegend=False,
-        margin=dict(l=55, r=55, t=20, b=55),  # generous margin for axis labels
-        **PLOTLY_DARK,
+        margin=dict(l=60, r=60, t=20, b=60),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0d1117",
+        font=dict(color="#8b949e", size=11),
     )
     return fig
 
@@ -1448,7 +1451,10 @@ def chart_price_cagr(df: pd.DataFrame, symbol: str) -> go.Figure:
         showlegend=False,
         height=300,
         margin=dict(l=40, r=20, t=50, b=40),
-        **PLOTLY_DARK,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0d1117",
+        font=dict(color="#8b949e", size=11),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=10)),
     )
     return fig
 
