@@ -202,7 +202,99 @@ NSE_SECTOR_MAP = {
     "ULTRACEMCO":  ("Cement",       "^CNXINFRA"),
 }
 
-ALL_STOCKS = sorted(NSE_SECTOR_MAP.keys())
+# ── Comprehensive NSE/BSE stock universe (500+ stocks) ────────────────────────
+STOCK_UNIVERSE = sorted(list(set([
+    # Nifty 50
+    "RELIANCE","TCS","HDFCBANK","ICICIBANK","INFOSYS","HINDUNILVR","ITC","SBIN",
+    "BHARTIARTL","KOTAKBANK","BAJFINANCE","WIPRO","HCLTECH","ASIANPAINT","MARUTI",
+    "LTIM","AXISBANK","SUNPHARMA","TITAN","ADANIENT","ADANIPORTS","ULTRACEMCO",
+    "POWERGRID","NTPC","ONGC","BAJAJ-AUTO","TATAMOTORS","TATASTEEL","JSWSTEEL",
+    "COALINDIA","DRREDDY","CIPLA","DIVISLAB","NESTLEIND","TECHM","BAJAJFINSV",
+    "GRASIM","HINDALCO","INDUSINDBK","APOLLOHOSP","EICHERMOT","BPCL","HEROMOTOCO",
+    "SBILIFE","HDFCLIFE","LT","TATACONSUM","M&M","UPL","BRITANNIA",
+    # Nifty Next 50
+    "ADANIGREEN","ADANITRANS","AMBUJACEM","BANKBARODA","BERGEPAINT","BEL",
+    "BOSCHLTD","CANBK","CHOLAFIN","COLPAL","DABUR","DLF","GAIL","GODREJCP",
+    "HAVELLS","HINDPETRO","ICICIPRULI","ICICIGI","INDIGO","IOC","IRCTC",
+    "JUBLFOOD","LICHSGFIN","LUPIN","MARICO","MCDOWELL-N","MFSL","MOTHERSON",
+    "MPHASIS","NAUKRI","PAGEIND","PETRONET","PIDILITIND","PIIND","RECLTD",
+    "SIEMENS","TORNTPHARM","TRENT","TVSMOTOR","VBL","VEDL","VOLTAS","ZOMATO",
+    "ZYDUSLIFE","OFSS","PERSISTENT","COFORGE","WHIRLPOOL","PNBHOUSING","MUTHOOTFIN",
+    # Midcap
+    "ABCAPITAL","ABFRL","APLAPOLLO","ASTRAL","AUROPHARMA","BALKRISIND",
+    "BANDHANBNK","BATAINDIA","BHEL","BIOCON","BLUEDART","CAMS","CANFINHOME",
+    "CESC","CROMPTON","CUMMINSIND","DALBHARAT","DEEPAKNTR","DIXON","DMART",
+    "ELGIEQUIP","ESCORTS","EXIDEIND","FEDERALBNK","FORTIS","GLENMARK","GLAXO",
+    "GMRINFRA","GODREJIND","HAPPSTMNDS","HFCL","HINDCOPPER","HONAUT","IDFCFIRSTB",
+    "IGL","INDHOTEL","INDIAMART","INDIANB","INDUSTOWER","JKCEMENT","JSWENERGY",
+    "KAJARIACER","KEC","KPITTECH","LALPATHLAB","LAURUSLABS","LINDEINDIA","LTTS",
+    "M&MFIN","MANAPPURAM","MAXHEALTH","MCX","METROPOLIS","MRPL","NAM-INDIA",
+    "NATIONALUM","NCC","NMDC","NYKAA","OBEROIRLTY","PGHH","PHOENIXLTD","PNB",
+    "POLYCAB","PRAJ","PVR","RAMCOCEM","RATNAMANI","RBL","REDINGTON","RELAXO",
+    "ROUTE","SCHAEFFLER","SHREECEM","SJVN","SKFINDIA","SOLARA","SONACOMS","SRF",
+    "STARHEALTH","SUPREMEIND","SYNGENE","TATACHEM","TATACOMM","TATAELXSI",
+    "TATAPOWER","TEAMLEASE","THERMAX","TIMKEN","TORNTPOWER","TRIDENT","TVSMOTOR",
+    "UJJIVANSFB","UNIONBANK","UBL","VGUARD","VINATIORGA","WELCORP","WESTLIFE",
+    # Smallcap / New-age
+    "AAVAS","ACCELYA","ADANIGAS","AFFLE","ALKEM","ALKYLAMINE","AMBER","APOLLOTYRE",
+    "ASHOKLEY","ATGL","AVANTIFEED","BAJAJHFL","BEML","BIKAJI","BLUESTARCO","BSE",
+    "CDSL","CENTURYTEX","CLEAN","COCHINSHIP","CONCOR","CRAFTSMAN","CYIENT",
+    "DCMSHRIRAM","DELTACORP","DHANUKA","DOMS","ECLERX","EIDPARRY","EMAMILTD",
+    "ENDURANCE","EPL","EQUITAS","ERIS","FINEORG","FIRSTSOURCE","GESHIP","GHCL",
+    "GODFRYPHLP","GOLDIAM","GRANULES","GREENPLY","GRSE","GUJGASLTD","HCG",
+    "HEIDELBERG","HIKAL","HONASA","HUDCO","IBREALEST","IDBI","IIFL","IIFLFIN",
+    "INDIACEM","INDOCOUNT","INOXWIND","INTELLECT","IPCALAB","IRCON","IREDA",
+    "IRFC","ITI","JAMNAAUTO","JKPAPER","JMFINANCIL","JUBILANT","KALPATPOWR",
+    "KARURVYSYA","KAYNES","KFINTECH","KNRCON","KRBL","LATENTVIEW","LAXMIMACH",
+    "LEMONTREE","LODHA","LUXIND","MAHLOG","MAPMYINDIA","MASTEK","MEDANTA","MEDPLUS",
+    "METROBRAND","MIDHANI","MOIL","MOTILALOFS","NAVINFLUOR","NESCO","NETWORK18",
+    "NRBBEARING","NUVAMA","OLECTRA","PATELENG","PCBL","PFIZER","POLICYBZR",
+    "POLYMED","POONAWALLA","PSPPROJECT","QUESS","QUICKHEAL","RAJESHEXPO","RALLIS",
+    "RATEGAIN","RAYMOND","ROSSARI","SAFARI","SAREGAMA","SOBHA","SPANDANA","SPARC",
+    "STLTECH","SUBROS","SUDARSCHEM","SUNDARMFIN","SWSOLAR","TANLA","TARSONS",
+    "TDPOWSYS","TEGA","TORNTPHARM","TRIVENI","UCOBANK","UGROCAP","UJJIVAN",
+    "UTIAMC","VAIBHAVGBL","VARROC","VESTIS","VINDHYATEL","VIP","VSTIND","WELSPUNLIV",
+    "YATHARTH","ZENSARTECH","ZFCVINDIA","PAYTM","DELHIVERY","CAMPUS","IXIGO",
+    "FIRSTCRY","TRACXN","KAYNES","SYRMA","EUREKA","UPDATER","SIGNATUREGLOBAL",
+])))
+
+
+def search_nse_stocks(query: str) -> List[str]:
+    """Search any NSE/BSE stock by symbol. Tries NSE autocomplete API first,
+    falls back to filtering the local 500+ stock universe."""
+    if not query or len(query.strip()) < 1:
+        return []
+    query_up = query.upper().strip()
+
+    # Try NSE autocomplete API
+    try:
+        sess = requests.Session()
+        sess.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer":    "https://www.nseindia.com",
+            "Accept":     "application/json",
+        })
+        sess.get("https://www.nseindia.com", timeout=5)
+        resp = sess.get(
+            f"https://www.nseindia.com/api/search-autocomplete?q={query_up}",
+            timeout=6,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            symbols = [
+                item.get("symbol", "").upper()
+                for item in data.get("symbols", [])
+                if item.get("symbol")
+            ]
+            if symbols:
+                return symbols[:20]
+    except Exception:
+        pass
+
+    # Fallback: prefix match first, then contains match
+    prefix  = [s for s in STOCK_UNIVERSE if s.startswith(query_up)]
+    contain = [s for s in STOCK_UNIVERSE if query_up in s and s not in prefix]
+    return (prefix + contain)[:20]
 
 SECTOR_POLICY_MAP = {
     "IT":          ["IT-BPO Promotion", "Digital India (₹1.13L Cr)", "STPI Incentives"],
@@ -218,6 +310,16 @@ SECTOR_POLICY_MAP = {
     "PSU Bank":    ["EASE Reforms", "National Asset Reconstruction", "Jan Dhan Push"],
     "Commodities": ["Coal Linkage Policy", "CIL Disinvestment", "Commodity Derivatives"],
     "Cement":      ["PM Awas Yojana (2Cr Homes)", "PMGSY Road Projects", "Infra Capex ₹11L Cr"],
+    "General":     ["DPIIT Investment Promotion", "Make In India Initiative", "Startup India Scheme"],
+    "Telecom":     ["5G Spectrum Allocation", "BharatNet Phase III", "PLI Telecom (₹12,195 Cr)"],
+    "Consumer":    ["PM-KUSUM Rural Push", "GST Rationalisation", "Rural Consumption Boost"],
+    "Logistics":   ["PM Gati Shakti", "NTDPC Road Plan", "Sagarmala Port Dev"],
+    "Aviation":    ["UDAN Scheme", "AAI Modernisation", "New Airport Policy"],
+    "Real Estate": ["PM Awas Yojana", "SWAMIH Stress Fund", "RERA Strengthening"],
+    "Chemical":    ["PLI Chemicals", "Bulk Drug Parks", "China+1 Opportunity"],
+    "Retail":      ["ONDC Digital Commerce", "FDI in Retail", "GST Input Credit"],
+    "Media":       ["OTT Regulation Framework", "Advertising GST Relief", "AVGC Promotion"],
+    "Healthcare":  ["Ayushman Bharat PM-JAY", "Medical Device Parks", "Health Budget ₹89K Cr"],
 }
 
 
@@ -506,9 +608,27 @@ def fetch_india_vix() -> float:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def _get_sector(symbol: str) -> str:
+    """Return sector for symbol; for unknown stocks guess from NSE API or default."""
+    if symbol in NSE_SECTOR_MAP:
+        return NSE_SECTOR_MAP[symbol][0]
+    try:
+        sess = requests.Session()
+        sess.headers.update({"User-Agent": "Mozilla/5.0", "Referer": "https://www.nseindia.com"})
+        sess.get("https://www.nseindia.com", timeout=4)
+        resp = sess.get(f"https://www.nseindia.com/api/quote-equity?symbol={symbol}", timeout=6)
+        if resp.status_code == 200:
+            data = resp.json()
+            sector = data.get("industryInfo", {}).get("sector", "General")
+            return sector if sector else "General"
+    except Exception:
+        pass
+    return "General"
+
+
 def fetch_sector_index(symbol: str) -> pd.DataFrame:
     """Fetch sector index data for comparison."""
-    sector, _ = NSE_SECTOR_MAP.get(symbol, ("General", "^NSEI"))
+    sector, _ = NSE_SECTOR_MAP.get(symbol, (_get_sector(symbol), "^NSEI"))
     rng = np.random.default_rng(_seed(sector))
     dates = pd.bdate_range(end=date.today(), periods=252)
     actual_n = len(dates)   # ← use actual length, not hardcoded 252
@@ -794,8 +914,8 @@ def chart_sector_comparison(symbol: str, stock_df_data: pd.DataFrame) -> go.Figu
     if len(common) < 10:
         common = stock_df_data.tail(252).index
 
-    s_close = stock_df_data["CLOSE"].reindex(common).fillna(method="ffill")
-    i_close = sector_df["CLOSE"].reindex(common).fillna(method="ffill")
+    s_close = stock_df_data["CLOSE"].reindex(common).ffill()
+    i_close = sector_df["CLOSE"].reindex(common).ffill()
 
     s_norm = s_close / s_close.iloc[0] * 100
     i_norm = i_close / i_close.iloc[0] * 100
@@ -956,8 +1076,44 @@ def render_sidebar() -> Tuple[str, str, str, str]:
     """, unsafe_allow_html=True)
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown('<div class="sidebar-label">Stock Selection</div>', unsafe_allow_html=True)
-    symbol = st.sidebar.selectbox("", ALL_STOCKS, index=ALL_STOCKS.index("RELIANCE"), label_visibility="collapsed")
+    st.sidebar.markdown('<div class="sidebar-label">Search Any NSE / BSE Stock</div>', unsafe_allow_html=True)
+
+    # ── Live search input ──────────────────────────────────────────────────────
+    search_query = st.sidebar.text_input(
+        "", placeholder="Type symbol e.g. RELIANCE, ZOMATO, IRFC",
+        key="stock_search", label_visibility="collapsed",
+    )
+
+    # Determine results to show
+    if search_query and len(search_query.strip()) >= 1:
+        results = search_nse_stocks(search_query)
+    else:
+        results = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN",
+                   "WIPRO","HCLTECH","BAJFINANCE","KOTAKBANK","HINDUNILVR",
+                   "ITC","SUNPHARMA","MARUTI","ZOMATO","PAYTM","IRFC","LT"]
+
+    if not results:
+        st.sidebar.warning("No stocks found. Try a different symbol.")
+        results = ["RELIANCE"]
+
+    # Persist last selected symbol so it survives re-runs
+    if "selected_symbol" not in st.session_state:
+        st.session_state.selected_symbol = "RELIANCE"
+
+    symbol = st.sidebar.selectbox(
+        "Select stock",
+        results,
+        index=0,
+        label_visibility="collapsed",
+        key="symbol_select",
+    )
+    st.session_state.selected_symbol = symbol
+
+    st.sidebar.markdown(
+        '<div style="font-size:11px;color:#8b949e;margin-top:4px;">' +
+        f'Showing {len(results)} result(s) · Type to search 1500+ NSE/BSE stocks' +
+        '</div>', unsafe_allow_html=True,
+    )
 
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-label">API Configuration</div>', unsafe_allow_html=True)
@@ -999,7 +1155,7 @@ def render_sidebar() -> Tuple[str, str, str, str]:
 def main():
     symbol, fmp_key, finnhub_key, tavily_key = render_sidebar()
 
-    sector_name, _ = NSE_SECTOR_MAP.get(symbol, ("General", "_"))
+    sector_name = _get_sector(symbol)
     vix = fetch_india_vix()
 
     # ── Regime Banner ─────────────────────────────────────────────────────────
@@ -1072,7 +1228,7 @@ def main():
           <div style="font-size:15px;font-weight:600;color:#e6edf3;margin-top:2px;">🏛 Govt & Macro</div>
         </div>""", unsafe_allow_html=True)
 
-        policies = SECTOR_POLICY_MAP.get(sector_name, ["Check DPIIT portal for latest schemes"])
+        policies = SECTOR_POLICY_MAP.get(sector_name, SECTOR_POLICY_MAP.get("General", ["Check DPIIT portal for latest schemes"]))
         st.markdown("**Active PLI / Policy Schemes**")
         for policy in policies:
             st.markdown(f"""<div class="news-card" style="border-left: 3px solid #f78166;">
