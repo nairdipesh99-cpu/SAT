@@ -959,189 +959,156 @@ def _fallback_verdict(master: Dict, price: float, tech: Dict) -> Dict:
     }
 
 
-def render_ai_verdict(
-    verdict: Dict,
-    symbol: str,
-    current_price: float,
-    has_api_key: bool,
-):
-    """Render the full AI agent verdict card."""
-    st_data = verdict.get("short_term", {})
-    lt_data = verdict.get("long_term",  {})
-    is_claude = verdict.get("_source") == "claude"
+def render_ai_verdict(verdict, symbol, current_price, has_api_key):
+    """Render the full AI agent verdict card. All HTML built via string concat — no nested f-strings."""
 
-    # ── Colour mapping ────────────────────────────────────────────────────────
-    def verd_color(v):
-        return {
-            "STRONG BUY": "#3fb950", "BUY": "#3fb950",
-            "ACCUMULATE": "#58a6ff", "HOLD": "#e3b341",
-            "REDUCE": "#f0883e",     "SELL": "#f85149",
-            "AVOID": "#f85149",
-        }.get(v, "#e3b341")
+    st_data    = verdict.get("short_term", {})
+    lt_data    = verdict.get("long_term",  {})
+    is_claude  = verdict.get("_source") == "claude"
 
-    def conf_badge(c):
-        return {
-            "HIGH":   ("🟢", "#3fb950"), "MEDIUM": ("🟡", "#e3b341"),
-            "LOW":    ("🔴", "#f85149"),
-        }.get(c, ("⚪", "#8b949e"))
+    VERDICT_COLOR = {
+        "STRONG BUY": "#3fb950", "BUY": "#3fb950",
+        "ACCUMULATE": "#58a6ff", "HOLD": "#e3b341",
+        "REDUCE": "#f0883e",     "SELL": "#f85149", "AVOID": "#f85149",
+    }
+    CONF_MAP = {"HIGH": ("&#x1F7E2;", "#3fb950"), "MEDIUM": ("&#x1F7E1;", "#e3b341"), "LOW": ("&#x1F534;", "#f85149")}
 
-    st_color = verd_color(st_data.get("verdict", "HOLD"))
-    lt_color = verd_color(lt_data.get("verdict", "HOLD"))
-    st_conf_icon, st_conf_color = conf_badge(st_data.get("confidence", "MEDIUM"))
-    lt_conf_icon, lt_conf_color = conf_badge(lt_data.get("confidence", "MEDIUM"))
+    st_color = VERDICT_COLOR.get(st_data.get("verdict","HOLD"), "#e3b341")
+    lt_color = VERDICT_COLOR.get(lt_data.get("verdict","HOLD"), "#e3b341")
+    st_ci, st_cc = CONF_MAP.get(st_data.get("confidence","MEDIUM"), ("&#x26AA;","#8b949e"))
+    lt_ci, lt_cc = CONF_MAP.get(lt_data.get("confidence","MEDIUM"), ("&#x26AA;","#8b949e"))
 
-    source_badge = (
-        '<span style="font-size:10px;background:#1f4a2e;color:#3fb950;'
-        'border:1px solid #3fb950;padding:2px 8px;border-radius:10px;margin-left:8px;">'
-        '🤖 Claude AI</span>'
-        if is_claude else
-        '<span style="font-size:10px;background:#232a35;color:#58a6ff;'
-        'border:1px solid #58a6ff;padding:2px 8px;border-radius:10px;margin-left:8px;">'
-        '⚙️ Rule Engine</span>'
-    )
+    if is_claude:
+        src_badge = ('<span style="font-size:10px;background:#1f4a2e;color:#3fb950;'
+                     'border:1px solid #3fb950;padding:2px 8px;border-radius:10px;margin-left:8px;">'
+                     '&#x1F916; Claude AI</span>')
+    else:
+        src_badge = ('<span style="font-size:10px;background:#232a35;color:#58a6ff;'
+                     'border:1px solid #58a6ff;padding:2px 8px;border-radius:10px;margin-left:8px;">'
+                     '&#9881;&#65039; Rule Engine</span>')
 
     if not has_api_key:
-        st.markdown("""
-        <div style="background:#1c2128;border:1px dashed #30363d;border-radius:10px;
-             padding:14px 18px;margin-bottom:8px;font-size:13px;color:#8b949e;">
-          🔑 Add your <strong style="color:#58a6ff;">Anthropic API Key</strong> in the sidebar
-          to unlock full Claude AI-powered verdict with precise price targets and strategy.
-          Without it, a rule-based fallback is shown below.
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            '<div style="background:#1c2128;border:1px dashed #30363d;border-radius:10px;'
+            'padding:14px 18px;margin-bottom:8px;font-size:13px;color:#8b949e;">'
+            '&#x1F511; Add your <strong style="color:#58a6ff;">Anthropic API Key</strong> '
+            'in the sidebar to unlock full Claude AI verdict with precise targets. '
+            'A rule-based fallback is shown below.</div>',
+            unsafe_allow_html=True,
+        )
 
-    st.markdown(f"""
-    <div class="ai-agent-card">
-      <div class="ai-verdict-header">🧠 AI Agent Verdict {source_badge}</div>
+    # Pre-compute all display values as plain strings
+    st_verdict    = st_data.get("verdict", "HOLD")
+    st_horizon    = st_data.get("horizon", "1-3 months")
+    st_confidence = st_data.get("confidence", "MEDIUM")
+    lt_verdict    = lt_data.get("verdict", "HOLD")
+    lt_horizon    = lt_data.get("horizon", "12-36 months")
+    lt_confidence = lt_data.get("confidence", "MEDIUM")
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+    header_html = (
+        '<div class="ai-agent-card">'
+        '<div class="ai-verdict-header">&#x1F9E0; AI Agent Verdict &nbsp;' + src_badge + '</div>'
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">'
+        '<div>'
+        '<div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">'
+        'Short Term &middot; ' + st_horizon + '</div>'
+        '<div class="ai-verdict-main" style="color:' + st_color + ';">' + st_verdict + '</div>'
+        '<div class="ai-verdict-sub">' + st_ci +
+        ' <span style="color:' + st_cc + ';">' + st_confidence + ' confidence</span></div>'
+        '</div>'
+        '<div>'
+        '<div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">'
+        'Long Term &middot; ' + lt_horizon + '</div>'
+        '<div class="ai-verdict-main" style="color:' + lt_color + ';">' + lt_verdict + '</div>'
+        '<div class="ai-verdict-sub">' + lt_ci +
+        ' <span style="color:' + lt_cc + ';">' + lt_confidence + ' confidence</span></div>'
+        '</div>'
+        '</div></div>'
+    )
+    st.markdown(header_html, unsafe_allow_html=True)
 
-        <!-- Short Term -->
-        <div>
-          <div style="font-size:11px;color:#8b949e;text-transform:uppercase;
-               letter-spacing:.06em;margin-bottom:8px;">
-            Short Term · {st_data.get("horizon","1-3 months")}
-          </div>
-          <div class="ai-verdict-main" style="color:{st_color};">
-            {st_data.get("verdict","HOLD")}
-          </div>
-          <div class="ai-verdict-sub">
-            {st_conf_icon} <span style="color:{st_conf_color};">
-            {st_data.get("confidence","MEDIUM")} confidence</span>
-          </div>
-        </div>
+    # ── Target / Stop Loss boxes ──────────────────────────────────────────────
+    def _fmt_price(v):
+        return "&#8377;" + "{:,.0f}".format(v) if v else "&#8212;"
 
-        <!-- Long Term -->
-        <div>
-          <div style="font-size:11px;color:#8b949e;text-transform:uppercase;
-               letter-spacing:.06em;margin-bottom:8px;">
-            Long Term · {lt_data.get("horizon","12-36 months")}
-          </div>
-          <div class="ai-verdict-main" style="color:{lt_color};">
-            {lt_data.get("verdict","HOLD")}
-          </div>
-          <div class="ai-verdict-sub">
-            {lt_conf_icon} <span style="color:{lt_conf_color};">
-            {lt_data.get("confidence","MEDIUM")} confidence</span>
-          </div>
-        </div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    def _fmt_pct(v):
+        if v is None: return ""
+        return "+" + "{:.1f}%".format(v) if v > 0 else "{:.1f}%".format(v)
 
-    # ── Target / Stop Loss strip ──────────────────────────────────────────────
+    def _target_card(label, price_val, pct_val, color):
+        return (
+            '<div class="ai-target-box">'
+            '<div class="ai-target-label">' + label + '</div>'
+            '<div class="ai-target-val" style="color:' + color + ';">' + _fmt_price(price_val) + '</div>'
+            '<div class="ai-target-upside" style="color:' + color + ';">' + _fmt_pct(pct_val) + '</div>'
+            '</div>'
+        )
+
+    st_tp = st_data.get("target_price")
+    st_up = st_data.get("upside_pct")
+    st_sl = st_data.get("stop_loss")
+    st_sl_pct = round((st_sl / current_price - 1) * 100, 1) if st_sl and current_price else None
+    lt_tp = lt_data.get("target_price")
+    lt_up = lt_data.get("upside_pct")
+    lt_sl = lt_data.get("stop_loss")
+    lt_sl_pct = round((lt_sl / current_price - 1) * 100, 1) if lt_sl and current_price else None
+
     t1, t2, t3, t4 = st.columns(4)
     with t1:
-        st_tp = st_data.get("target_price")
-        st_up = st_data.get("upside_pct")
-        st.markdown(f"""<div class="ai-target-box">
-          <div class="ai-target-label">ST Target</div>
-          <div class="ai-target-val" style="color:#3fb950;">
-            {"₹{:,.0f}".format(st_tp) if st_tp else "—"}
-          </div>
-          <div class="ai-target-upside" style="color:#3fb950;">
-            {"+{:.1f}%".format(st_up) if st_up else ""}
-          </div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(_target_card("ST Target",   st_tp, st_up,    "#3fb950"), unsafe_allow_html=True)
     with t2:
-        st_sl = st_data.get("stop_loss")
-        st_sl_pct = round((st_sl / current_price - 1) * 100, 1) if st_sl else None
-        st.markdown(f"""<div class="ai-target-box">
-          <div class="ai-target-label">ST Stop Loss</div>
-          <div class="ai-target-val" style="color:#f85149;">
-            {"₹{:,.0f}".format(st_sl) if st_sl else "—"}
-          </div>
-          <div class="ai-target-upside" style="color:#f85149;">
-            {"{:.1f}%".format(st_sl_pct) if st_sl_pct else ""}
-          </div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(_target_card("ST Stop Loss",st_sl, st_sl_pct,"#f85149"), unsafe_allow_html=True)
     with t3:
-        lt_tp = lt_data.get("target_price")
-        lt_up = lt_data.get("upside_pct")
-        st.markdown(f"""<div class="ai-target-box">
-          <div class="ai-target-label">LT Target</div>
-          <div class="ai-target-val" style="color:#d2a8ff;">
-            {"₹{:,.0f}".format(lt_tp) if lt_tp else "—"}
-          </div>
-          <div class="ai-target-upside" style="color:#d2a8ff;">
-            {"+{:.1f}%".format(lt_up) if lt_up else ""}
-          </div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(_target_card("LT Target",   lt_tp, lt_up,    "#d2a8ff"), unsafe_allow_html=True)
     with t4:
-        lt_sl = lt_data.get("stop_loss")
-        lt_sl_pct = round((lt_sl / current_price - 1) * 100, 1) if lt_sl else None
-        st.markdown(f"""<div class="ai-target-box">
-          <div class="ai-target-label">LT Stop Loss</div>
-          <div class="ai-target-val" style="color:#f85149;">
-            {"₹{:,.0f}".format(lt_sl) if lt_sl else "—"}
-          </div>
-          <div class="ai-target-upside" style="color:#f85149;">
-            {"{:.1f}%".format(lt_sl_pct) if lt_sl_pct else ""}
-          </div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(_target_card("LT Stop Loss",lt_sl, lt_sl_pct,"#f85149"), unsafe_allow_html=True)
 
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
     # ── Bull / Bear / Strategy ────────────────────────────────────────────────
+    def _list_items(items, icon):
+        return "".join('<div class="ai-reasoning-item">' + icon + " " + r + "</div>" for r in items)
+
+    bull  = verdict.get("bull_case", [])
+    bear  = verdict.get("bear_case", [])
+    risks = verdict.get("key_risks", [])
+    strat = verdict.get("suggested_strategy", "")
+
     b1, b2, b3 = st.columns(3)
     with b1:
-        bull = verdict.get("bull_case", [])
-        items = "".join(
-            f'<div class="ai-reasoning-item">✅ {r}</div>' for r in bull
+        st.markdown(
+            '<div class="ai-reasoning-block">'
+            '<div class="ai-reasoning-title" style="color:#3fb950;">&#x1F402; Bull Case</div>'
+            + _list_items(bull, "&#x2705;") + "</div>",
+            unsafe_allow_html=True,
         )
-        st.markdown(f"""<div class="ai-reasoning-block">
-          <div class="ai-reasoning-title" style="color:#3fb950;">🐂 Bull Case</div>
-          {items}
-        </div>""", unsafe_allow_html=True)
     with b2:
-        bear = verdict.get("bear_case", [])
-        items = "".join(
-            f'<div class="ai-reasoning-item">⚠️ {r}</div>' for r in bear
+        st.markdown(
+            '<div class="ai-reasoning-block">'
+            '<div class="ai-reasoning-title" style="color:#f85149;">&#x1F43B; Bear Case</div>'
+            + _list_items(bear, "&#x26A0;&#xFE0F;") + "</div>",
+            unsafe_allow_html=True,
         )
-        st.markdown(f"""<div class="ai-reasoning-block">
-          <div class="ai-reasoning-title" style="color:#f85149;">🐻 Bear Case</div>
-          {items}
-        </div>""", unsafe_allow_html=True)
     with b3:
-        risks = verdict.get("key_risks", [])
-        strat = verdict.get("suggested_strategy", "")
-        risk_items = "".join(
-            f'<div class="ai-reasoning-item">🔺 {r}</div>' for r in risks
+        strat_item = (
+            '<div class="ai-reasoning-item" style="color:#58a6ff;font-weight:500;">'
+            "&#x1F4CB; " + strat + "</div>" if strat else ""
         )
-        st.markdown(f"""<div class="ai-reasoning-block">
-          <div class="ai-reasoning-title" style="color:#e3b341;">⚡ Strategy</div>
-          <div class="ai-reasoning-item" style="color:#58a6ff;font-weight:500;">
-            📋 {strat}
-          </div>
-          {risk_items}
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ai-reasoning-block">'
+            '<div class="ai-reasoning-title" style="color:#e3b341;">&#x26A1; Strategy</div>'
+            + strat_item + _list_items(risks, "&#x1F53A;") + "</div>",
+            unsafe_allow_html=True,
+        )
 
     # ── Conviction statement ──────────────────────────────────────────────────
     conviction = verdict.get("conviction_statement", "")
     if conviction:
-        st.markdown(f"""
-        <div class="ai-conviction">
-          💡 <strong style="color:#58a6ff;">AI Conviction:</strong> {conviction}
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ai-conviction">'
+            '&#x1F4A1; <strong style="color:#58a6ff;">AI Conviction:</strong> ' + conviction + "</div>",
+            unsafe_allow_html=True,
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
