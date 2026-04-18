@@ -510,10 +510,10 @@ def fetch_sector_index(symbol: str) -> pd.DataFrame:
     """Fetch sector index data for comparison."""
     sector, _ = NSE_SECTOR_MAP.get(symbol, ("General", "^NSEI"))
     rng = np.random.default_rng(_seed(sector))
-    n = 252
-    dates = pd.bdate_range(end=date.today(), periods=n)
+    dates = pd.bdate_range(end=date.today(), periods=252)
+    actual_n = len(dates)   # ← use actual length, not hardcoded 252
     mu, sigma = 0.00035, 0.012
-    idx_returns = rng.normal(mu, sigma, n)
+    idx_returns = rng.normal(mu, sigma, actual_n)
     idx_price = 10000 * (1 + idx_returns).cumprod()
     return pd.DataFrame({"CLOSE": idx_price}, index=dates)
 
